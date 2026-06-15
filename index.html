@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asistente de Almacén - Promart</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-image: url("https://backendproyecta.proyecta.net.pe/storage/projects/1615255868.jpg");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            max-width: 480px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.94);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .logo {
+            width: 150px;
+            display: block;
+            margin: 0 auto 15px;
+        }
+        h2 { 
+            color: #ff6a00; 
+            margin-top: 0; 
+            font-size: 22px;
+            border-bottom: 2px solid #ff6a00;
+            padding-bottom: 8px;
+        }
+        p { color: #444; font-size: 14px; margin: 5px 0 15px; }
+        #reader {
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+            margin-bottom: 15px;
+            min-height: 240px;
+        }
+        .resultado-box {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #fdfdfd;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        .resultado-box h3 { margin: 0 0 10px 0; color: #ff6a00; font-size: 16px; }
+        .dato { font-size: 16px; margin: 8px 0; color: #333; word-break: break-word; }
+        .resaltado { font-weight: bold; color: #28a745; font-size: 20px; }
+        .error { color: #dc3545; font-weight: bold; }
+        .info-status { font-size: 13px; color: #666; text-align: center; margin-top: 10px; font-weight: bold; }
+        
+        /* SECCIÓN JULIANA */
+        .seccion-juliana {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 2px dashed #ccc;
+            text-align: center;
+        }
+        input, button {
+            width: 100%;
+            padding: 11px;
+            margin-top: 10px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #ff6a00;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 15px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #e65c00;
+        }
+        .panel-resultado-juliano {
+            margin-top: 12px;
+            background: #fff;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #ff6a00;
+            text-align: left;
+            box-sizing: border-box;
+        }
+        .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
+        .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
+
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" class="logo">
+    
+    <h2>ESCANEA EL PRODUCTO</h2>
+    <p>Apunta al código EAN con la cámara trasera</p>
+    
+    <div id="reader"></div>
+
+    <div class="resultado-box">
+        <h3>Resultado del Escaneo:</h3>
+        <div id="txt-desc" class="dato"><b>DESCRIPCIÓN:</b> <span class="error">---</span></div>
+        <div id="txt-vida" class="dato"><b>Vida Útil (Meses):</b> <span id="vida-val" class="resaltado">---</span></div>
+    </div>
+    <div id="txt-status" class="info-status">Conectando con las listas de almacén...</div>
+
+    <div class="seccion-juliana">
+        <h2>Consulta Juliana + Vencimiento</h2>
+        <p>Calcula la fecha real de fabricación y proyecta el vencimiento exacto</p>
+        
+        <input type="number" id="anio" placeholder="Inserte el año (Ej: 2026)" oninput="this.value=this.value.slice(0,4)">
+        <input type="number" id="juliano" placeholder="Inserte los 3 dígitos (Ej: 198)" oninput="this.value=this.value.slice(0,3)">
+        
+        <button onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
+        
+        <div class="panel-resultado-juliano">
+            <div id="res-fabricacion" class="linea-res"><b>Fecha Real:</b> Esperando datos...</div>
+            <div id="res-vencimiento" class="linea-res"><b>Vence el:</b> ---</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let baseDatosUnificada = {};
+    let html5QrCode;
+    let mesesVidaUtilActual = 0; // Guardará la vida útil limpia en MESES
+
+    // 1. Descargar las listas JSON
+    function cargarDatosYArrancar() {
+        Promise.all([
+            fetch('FV-01.json').then(res => res.json()),
+            fetch('FV-02.json').then(res => res.json())
+        ])
+        .then(([data1, data2]) => {
+            const listaCompleta = data1.concat(data2);
+            
+            listaCompleta.forEach(item => {
+                let ean = item["CÃ³digo de barras"] || item["Código de barras"] || item["EAN"] || item["Codigo de barras"];
+                if (ean) {
+                    baseDatosUnificada[String(ean).trim()] = item;
+                }
+            });
+
+            document.getElementById('txt-status').innerText = "✅ Sistema listo y conectado.";
+            arrancarCamaraUniversal();
+        })
+        .catch(err => {
+            console.error(err);
+            document.getElementById('txt-status').innerHTML = "<span class='error'>⚠️ Error en archivos JSON.</span>";
+            arrancarCamaraUniversal();
+        });
+    }
+
+    // 2. Encendido de cámara trasera universal
+    function arrancarCamaraUniversal() {
+        html5QrCode = new Html5Qrcode("reader");
+        const camaraConfig = { facingMode: { exact: "environment" } };
+        const escanerConfig = { fps: 15, qrbox: { width: 280, height: 160 } };
+
+        html5QrCode.start(camaraConfig, escanerConfig, onScanSuccess)
+        .catch(err => {
+            html5QrCode.start({ facingMode: "environment" }, escanerConfig, onScanSuccess).catch(() => {});
+        });
+    }
+
+    // 3. Al escanear el producto con éxito
+    function onScanSuccess(decodedText, decodedResult) {
+        const eanEscaneado = decodedText.trim();
+        const producto = baseDatosUnificada[eanEscaneado];
+
+        if (producto) {
+            let descripcion = producto["DescripciÃ³n de SKU"] || producto["Descripción de SKU"] || "Sin descripción";
+            let vidaUtilTexto = producto["FV"] || "0";
+
+            document.getElementById('txt-desc').innerHTML = `<b>DESCRIPCIÓN:</b> ${descripcion}`;
+            document.getElementById('vida-val').innerText = vidaUtilTexto !== "" ? vidaUtilTexto : "0";
+
+            // Guardamos el número limpio como MESES
+            let numerosExtraidos = vidaUtilTexto.replace(/\D/g, '');
+            mesesVidaUtilActual = numerosExtraidos !== "" ? parseInt(numerosExtraidos) : 0;
+            
+            // Recalcular de inmediato si ya hay datos julianos abajo
+            if(document.getElementById("anio").value !== "" && document.getElementById("juliano").value !== "") {
+                convertirFechaJulianaCompleta();
+            }
+        } else {
+            document.getElementById('txt-desc').innerHTML = `<span class='error'>Código: ${eanEscaneado} <br>Producto no registrado</span>`;
+            document.getElementById('vida-val').innerText = "---";
+            mesesVidaUtilActual = 0;
+        }
+    }
+
+    function esBisiesto(anio) {
+        return (anio % 4 === 0 && anio % 100 !== 0) || (anio % 400 === 0);
+    }
+
+    // 4. Conversión Juliana + Salto de Meses y Años Automático
+    function convertirFechaJulianaCompleta(){
+        let anioInput = document.getElementById("anio").value;
+        let julianoInput = document.getElementById("juliano").value;
+        
+        let contenedorFab = document.getElementById("res-fabricacion");
+        let contenedorVen = document.getElementById("res-vencimiento");
+
+        if(anioInput === "" || julianoInput === ""){
+            contenedorFab.innerHTML = "<span style='color: #dc3545;'>Completa los campos</span>";
+            return;
+        }
+
+        let anio = parseInt(anioInput.replace(/\D/g,''));
+        let juliano = parseInt(julianoInput.replace(/\D/g,''));
+
+        let maxDias = esBisiesto(anio) ? 366 : 365;
+        if(juliano < 1 || juliano > maxDias || anio < 1000){
+            contenedorFab.innerHTML = "<span style='color: #dc3545;'>Año o código incorrecto</span>";
+            return;
+        }
+
+        let fechaFabricacion = new Date(anio, 0);
+        fechaFabricacion.setDate(juliano);
+
+        let diaF = fechaFabricacion.getDate().toString().padStart(2, '0');
+        let mesF = (fechaFabricacion.getMonth() + 1).toString().padStart(2, '0');
+        
+        contenedorFab.innerHTML = `<b>Fecha Real:</b> ${diaF}/${mesF}/${anio}`;
+
+        // --- MANEJO INTELIGENTE DE FECHAS (AVANZA MESES Y AÑOS) ---
+        if (mesesVidaUtilActual > 0) {
+            let fechaVencimiento = new Date(fechaFabricacion.getTime());
+            
+            // setMonth recalcula automáticamente el año si se pasa de 12 meses
+            fechaVencimiento.setMonth(fechaVencimiento.getMonth() + mesesVidaUtilActual);
+
+            let diaV = fechaVencimiento.getDate().toString().padStart(2, '0');
+            let mesV = (fechaVencimiento.getMonth() + 1).toString().padStart(2, '0');
+            let anioV = fechaVencimiento.getFullYear();
+
+            let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+            let mesNombre = nombresMeses[fechaVencimiento.getMonth()];
+
+            contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${mesNombre})</span>`;
+        } else {
+            contenedorVen.innerHTML = `<b>Vence el:</b> <span style='color: #666;'>Escanea un producto con vida útil primero</span>`;
+        }
+    }
+
+    window.onload = cargarDatosYArrancar;
+</script>
+</body>
+</html>
