@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba de Cámara Forzada</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #f0f2f5; padding: 20px; }
+        .box { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #reader { width: 100%; background: black; min-height: 250px; border-radius: 8px; }
+        button { background: #007bff; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; margin-bottom: 15px; width: 100%; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2>ESCANEA EL PRODUCTO</h2>
+    <p>Si la cámara no enciende sola, presiona el botón de abajo:</p>
+    
+    <button onclick="forzarCamara()">📸 ENCENDER CÁMARA MANUALLY</button>
+    
+    <div id="reader"></div>
+    <p id="error-log" style="color: red; font-weight: bold;"></p>
+</div>
+
+<script>
+    // Configuración ultra-básica para evitar errores de carga
+    function forzarCamara() {
+        const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+        
+        html5QrcodeScanner.render(
+            (text) => { alert("¡Código detectado!: " + text); },
+            (err) => { console.log(err); }
+        );
+    }
+
+    // Intentar encender automáticamente al cargar
+    window.onload = function() {
+        setTimeout(forzarCamara, 1000);
+    };
+</script>
+</body>
+</html>
