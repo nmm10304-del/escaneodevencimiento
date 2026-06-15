@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escáner de Almacén Universal</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        h2 { color: #333; margin-top: 0; font-size: 26px; }
+        #reader {
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+            margin-bottom: 15px;
+            min-height: 250px;
+        }
+        .resultado-box {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #eef2f7;
+            text-align: left;
+        }
+        .resultado-box h3 { margin: 0 0 10px 0; color: #0056b3; }
+        .dato { font-size: 18px; margin: 8px 0; color: #444; }
+        .resaltado { font-weight: bold; color: #28a745; font-size: 24px; }
+        .error { color: #dc3545; font-weight: bold; }
+        .info-status { font-size: 13px; color: #555; text-align: center; margin-top: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>ESCANEA EL PRODUCTO</h2>
+    <p>Apunta al código EAN con la cámara de atrás</p>
+    
+    <div id="reader"></div>
+
+    <div class="resultado-box">
+        <h3>Resultado del Escaneo:</h3>
+        <div id="txt-desc" class="dato"><b>DESCRIPCIÓN:</b> ---</div>
+        <div id="txt-vida" class="dato"><b>Vida Útil:</b> <span id="vida-val" class="resaltado">---</span></div>
+    </div>
+    <div id="txt-status" class="info-status">Vinculando almacén...</div>
+</div>
+
+<script>
+    // Usaremos un Diccionario optimizado indexado por Código de barras
+    let diccionarioProductos = {};
+
+    // 1. Descargar las listas JSON y estructurarlas correctamente
+    function cargarDatosYArrancar() {
+        Promise.all([
+            fetch('FV-01.json').then(res => res.json()),
+            fetch('FV-02.json').then(res => res.json())
+        ])
+        .then(([data1, data2]) => {
+            // Unimos ambas listas en un solo arreglo plano
+            const listaCompleta = data1.concat(data2);
+            
+            // Convertimos la lista plana en un diccionario rápido usando el código de barras como llave
+            listaCompleta.forEach(item => {
+                // Buscamos la propiedad del código de barras (con o sin caracteres extraños)
+                let ean = item["CÃ³digo de barras"] || item["Código de barras"] || item["EAN"] || item["Codigo de barras"];
+                
+                if (ean) {
+                    let eanLimpio = String(ean).trim();
+                    diccionarioProductos[eanLimpio] = item;
+                }
+            });
+
+            document.getElementById('txt-status').innerText = "✅ Sistema listo y conectado.";
+            arrancarCamaraUniversal();
+        })
+        .catch(err => {
+            console.error(err);
+            document.getElementById('txt-status').innerHTML = "<span class='error'>⚠️ Error al procesar los archivos JSON.</span>";
+            arrancarCamaraUniversal();
+        });
+    }
+
+    // 2. Encendido de la cámara trasera universal
+    function arrancarCamaraUniversal() {
+        const html5QrCode = new Html5Qrcode("reader");
+        const camaraConfig = { facingMode: { exact: "environment" } };
+        const escanerConfig = { fps: 15, qrbox: { width: 280, height: 160 } };
+
+        html5QrCode.start(camaraConfig, escanerConfig, onScanSuccess)
+        .catch(err => {
+            console.warn("Modo estricto falló, usando respaldo:", err);
+            html5QrCode.start({ facingMode: "environment" }, escanerConfig, onScanSuccess)
+            .catch(err2 => {
+                document.getElementById('txt-status').innerHTML = "<span class='error'>No se pudo acceder a la cámara.</span>";
+            });
+        });
+    }
+
+    // 3. Respuesta inmediata al escanear el código
+    function onScanSuccess(decodedText, decodedResult) {
+        const eanEscaneado = decodedText.trim();
+        const producto = diccionarioProductos[eanEscaneado];
+
+        if (producto) {
+            // Mapeo exacto de los campos raros que vimos en tu captura de VS Code
+            let descripcion = producto["DescripciÃ³n de SKU"] || producto["Descripción de SKU"] || "Sin descripción";
+            let vidaUtil = producto["FV"] || "No definida";
+
+            document.getElementById('txt-desc').innerHTML = `<b>DESCRIPCIÓN:</b> ${descripcion}`;
+            document.getElementById('vida-val').innerText = vidaUtil !== "" ? vidaUtil : "Vacío en JSON";
+        } else {
+            document.getElementById('txt-desc').innerHTML = `<span class='error'>Código: ${eanEscaneado} <br>Producto no registrado en los archivos</span>`;
+            document.getElementById('vida-val').innerText = "---";
+        }
+    }
+
+    window.onload = cargarDatosYArrancar;
+</script>
+</body>
+</html>
