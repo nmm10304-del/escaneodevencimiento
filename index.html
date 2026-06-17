@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asistente de Almacén - Promart</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-image: url("https://backendproyecta.proyecta.net.pe/storage/projects/1615255868.jpg");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            max-width: 480px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.94);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .logo {
+            width: 150px;
+            display: block;
+            margin: 0 auto 15px;
+        }
+        h2 { 
+            color: #ff6a00; 
+            margin-top: 0; 
+            font-size: 22px;
+            border-bottom: 2px solid #ff6a00;
+            padding-bottom: 8px;
+        }
+        p { color: #444; font-size: 14px; margin: 5px 0 15px; }
+        #reader {
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+            margin-bottom: 12px;
+            min-height: 240px;
+        }
+        
+        .btn-linterna {
+            background: #212529;
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-bottom: 15px;
+            width: 100%;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .resultado-box {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #fdfdfd;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        .resultado-box h3 { margin: 0 0 10px 0; color: #ff6a00; font-size: 16px; font-weight: bold; }
+        .dato { font-size: 16px; margin: 8px 0; color: #333; word-break: break-word; }
+        .resaltado { font-weight: bold; color: #28a745; font-size: 18px; }
+        .error { color: #dc3545; font-weight: bold; }
+        .info-status { font-size: 13px; color: #666; text-align: center; margin-top: 10px; font-weight: bold; }
+
+        .seccion-juliana {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 2px dashed #ccc;
+            text-align: center;
+        }
+        input, button {
+            width: 100%;
+            padding: 11px;
+            margin-top: 10px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #ff6a00;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 15px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #e65c00;
+        }
+        .panel-resultado-juliano {
+            margin-top: 12px;
+            background: #fff;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #ff6a00;
+            text-align: left;
+            box-sizing: border-box;
+        }
+        .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
+        .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
+
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" class="logo">
+    
+    <h2>ESCANEA EL PRODUCTO</h2>
+    <p>Apunta al código EAN con la cámara trasera</p>
+    
+    <div id="reader"></div>
+
+    <button id="btn-flash" class="btn-linterna" onclick="controlarFlashNativo()">💡 ENCENDER LINTERNA</button>
+
+    <div class="resultado-box">
+        <h3>Resultado de escaneo:</h3>
+        <div id="txt-desc" class="dato"><b>Descripción:</b> <span class="error">---</span></div>
+        <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
+        <div id="txt-vida" class="dato"><b>Vida útil (meses):</b> <span id="vida-val" class="resaltado">---</span></div>
+    </div>
+    <div id="txt-status" class="info-status">Cargando listas de almacén...</div>
+
+    <div class="seccion-juliana">
+        <h2>Consulta Juliana + Vencimiento</h2>
+        <p>Calcula la fecha real de fabricación y proyecta el vencimiento exacto</p>
+        
+        <input type="number" id="anio" placeholder="Inserte el año (Ej: 2026)" oninput="this.value=this.value.slice(0,4)">
+        <input type="number" id="juliano" placeholder="Inserte los 3 dígitos (Ej: 198)" oninput="this.value=this.value.slice(0,3)">
+        
+        <button onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
+        
+        <div class="panel-resultado-juliano">
+            <div id="res-fabricacion" class="linea-res"><b>Fecha Real:</b> Esperando datos...</div>
+            <div id="res-vencimiento" class="linea-res"><b>Vence el:</b> ---</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let baseDatosUnificada = {};
+    let html5QrCode;
+    let mesesVidaUtilActual = 0;
+    let flashActivo = false;
+    let videoTrackNativo = null;
+
+    function limpiarCodigoEan(codigo) {
+        return String(codigo).replace(/\D/g, '').trim();
+    }
+
+    function cargarDatosYArrancar() {
+        let peticiones = [];
+        let archivosEncontrados = 0;
+
+        // Bucle configurado exactamente hasta el archivo 43 (FV-43.json)
+        for (let i = 1; i <= 43; i++) {
+            peticiones.push(
+                fetch(`FV-${i}.json`)
+                .then(res => {
+                    if (!res.ok) throw new Error(`Falta`);
+                    archivosEncontrados++;
+                    return res.json();
+                })
+                .catch(() => {
+                    return null;
+                })
+            );
+        }
+
+        Promise.all(peticiones)
+        .then((todasLasListas) => {
+            let totalProductos = 0;
+
+            todasLasListas.forEach(lista => {
+                if (lista && Array.isArray(lista)) {
+                    lista.forEach(item => {
+                        let eanOriginal = item["CÃ³digo de barras"] || item["Código de barras"] || item["EAN"] || item["Codigo de barras"] || item["CÓDIGO DE BARRAS"] || item["CÓDIGO"] || item["CODIGO"] || item["SKU"];
+                        if (eanOriginal) {
+                            let eanNumerico = limpiarCodigoEan(eanOriginal);
+                            if (eanNumerico) {
+                                baseDatosUnificada[eanNumerico] = item;
+                                totalProductos++;
+                                
+                                let eanSinCeros = eanNumerico.replace(/^0+/, '');
+                                if (eanSinCeros !== eanNumerico && eanSinCeros !== "") {
+                                    baseDatosUnificada[eanSinCeros] = item;
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+
+            // Mostrará "¡43 listas mapeadas correctamente!" en la barra de estado inferior
+            document.getElementById('txt-status').innerText = `✅ ¡${archivosEncontrados} listas mapeadas correctamente! (${totalProductos} artículos listos).`;
+            arrancarCamaraUniversal();
+        })
+        .catch(err => {
+            console.error(err);
+            document.getElementById('txt-status').innerHTML = "<span class='error'>⚠️ Error crítico al consolidar datos de memoria.</span>";
+            arrancarCamaraUniversal();
+        });
+    }
+
+    function arrancarCamaraUniversal() {
+        html5QrCode = new Html5Qrcode("reader");
+        const camaraConfig = { facingMode: { exact: "environment" } };
+        const escanerConfig = { fps: 15, qrbox: { width: 280, height: 160 } };
+
+        html5QrCode.start(camaraConfig, escanerConfig, onScanSuccess)
+        .then(() => capturarCanalVideoNativo())
+        .catch(err => {
+            html5QrCode.start({ facingMode: "environment" }, escanerConfig, onScanSuccess)
+            .then(() => capturarCanalVideoNativo())
+            .catch(() => {});
+        });
+    }
+
+    function capturarCanalVideoNativo() {
+        setTimeout(() => {
+            try {
+                const elementoVideo = document.querySelector("#reader video");
+                if (elementoVideo && elementoVideo.srcObject) {
+                    videoTrackNativo = elementoVideo.srcObject.getVideoTracks()[0];
+                }
+            } catch (e) {
+                console.warn(e);
+            }
+        }, 1200);
+    }
+
+    function controlarFlashNativo() {
+        const boton = document.getElementById("btn-flash");
+        if (!videoTrackNativo) {
+            const elementoVideo = document.querySelector("#reader video");
+            if (elementoVideo && elementoVideo.srcObject) {
+                videoTrackNativo = elementoVideo.srcObject.getVideoTracks()[0];
+            }
+        }
+        if (!videoTrackNativo) {
+            alert("Espera a que la cámara encienda por completo.");
+            return;
+        }
+        flashActivo = !flashActivo;
+        videoTrackNativo.applyConstraints({ advanced: [{ torch: flashActivo }] })
+        .then(() => {
+            if (flashActivo) {
+                boton.innerHTML = "🚫 APAGAR LINTERNA";
+                boton.style.background = "#dc3545";
+            } else {
+                boton.innerHTML = "💡 ENCENDER LINTERNA";
+                boton.style.background = "#212529";
+            }
+        })
+        .catch(() => {
+            flashActivo = !flashActivo;
+            alert("Control de linterna no soportado en este navegador.");
+        });
+    }
+
+    function onScanSuccess(decodedText, decodedResult) {
+        let eanLecturaOriginal = decodedText.trim();
+        let eanNumericoCamara = limpiarCodigoEan(eanLecturaOriginal);
+        
+        let producto = baseDatosUnificada[eanNumericoCamara];
+
+        if (!producto) {
+            let eanSinCeros = eanNumericoCamara.replace(/^0+/, '');
+            producto = baseDatosUnificada[eanSinCeros];
+        }
+
+        if (!producto && eanNumericoCamara.length >= 10) {
+            let eanSinVerificador = eanNumericoCamara.slice(0, -1);
+            producto = baseDatosUnificada[eanSinVerificador] || baseDatosUnificada[eanSinVerificador.replace(/^0+/, '')];
+        }
+
+        if (!producto) {
+            for (let codigoRegistrado in baseDatosUnificada) {
+                if (eanNumericoCamara.includes(codigoRegistrado) && codigoRegistrado.length >= 8) {
+                    producto = baseDatosUnificada[codigoRegistrado];
+                    break;
+                }
+            }
+        }
+
+        if (producto) {
+            let descripcion = "Sin descripción";
+            let sku = "---";
+            let vidaUtilTexto = "0";
+
+            for (let llave in producto) {
+                let llaveMin = llave.toLowerCase();
+                let valor = String(producto[llave]).trim();
+
+                if (llaveMin.includes("descrip") || (llaveMin.includes("sku") && valor.match(/[a-zA-Z]/))) {
+                    descripcion = valor;
+                }
+                
+                if ((llaveMin.includes("art") || llaveMin.includes("sku") || llaveMin.includes("mat") || llaveMin.includes("cod")) && valor.length >= 4 && valor.length <= 8 && !isNaN(valor)) {
+                    sku = valor;
+                }
+                
+                if (llaveMin.includes("fv") || llaveMin.includes("vida") || llaveMin.includes("util")) {
+                    vidaUtilTexto = valor;
+                }
+            }
+
+            if (sku === "---") {
+                for (let llave in producto) {
+                    let valor = String(producto[llave]).trim();
+                    if (valor.length >= 5 && valor.length <= 7 && !isNaN(valor) && valor !== eanNumericoCamara) {
+                        sku = valor;
+                        break;
+                    }
+                }
+            }
+
+            if (sku === "---") {
+                sku = "Desconocido";
+            }
+
+            document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${descripcion}`;
+            document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${sku}`;
+
+            let numerosExtraidos = vidaUtilTexto.replace(/\D/g, '');
+            mesesVidaUtilActual = numerosExtraidos !== "" ? parseInt(numerosExtraidos) : 0;
+            
+            if (mesesVidaUtilActual > 0) {
+                let aniosCompletos = Math.floor(mesesVidaUtilActual / 12);
+                let mesesRestantes = mesesVidaUtilActual % 12;
+                let textoParentesis = "";
+
+                if (aniosCompletos > 0) {
+                    let etiquetaAnio = aniosCompletos === 1 ? "año" : "años";
+                    if (mesesRestantes > 0) {
+                        let etiquetaMes = mesesRestantes === 1 ? "mes" : "meses";
+                        textoParentesis = `(${aniosCompletos} ${etiquetaAnio} y ${mesesRestantes} ${etiquetaMes})`;
+                    } else {
+                        textoParentesis = `(${aniosCompletos} ${etiquetaAnio})`;
+                    }
+                } else {
+                    let etiquetaMes = mesesRestantes === 1 ? "mes" : "meses";
+                    textoParentesis = `(${mesesRestantes} ${etiquetaMes})`;
+                }
+                
+                document.getElementById('vida-val').innerText = `${mesesVidaUtilActual} ${textoParentesis}`;
+            } else {
+                document.getElementById('vida-val').innerText = "0";
+            }
+            
+            if(document.getElementById("anio").value !== "" && document.getElementById("juliano").value !== "") {
+                convertirFechaJulianaCompleta();
+            }
+        } else {
+            document.getElementById('txt-desc').innerHTML = `<span class='error'>Código: ${eanLecturaOriginal} <br>Producto no registrado</span>`;
+            document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ---`;
+            document.getElementById('vida-val').innerText = "---";
+            mesesVidaUtilActual = 0;
+        }
+    }
+
+    function esBisiesto(anio) {
+        return (anio % 4 === 0 && anio % 100 !== 0) || (anio % 400 === 0);
+    }
+
+    function convertirFechaJulianaCompleta(){
+        let anioInput = document.getElementById("anio").value;
+        let julianoInput = document.getElementById("juliano").value;
+        let contenedorFab = document.getElementById("res-fabricacion");
+        let contenedorVen = document.getElementById("res-vencimiento");
+
+        if(anioInput === "" || julianoInput === ""){
+            contenedorFab.innerHTML = "<span style='color: #dc3545;'>Completa los campos</span>";
+            return;
+        }
+
+        let anio = parseInt(anioInput.replace(/\D/g,''));
+        let juliano = parseInt(julianoInput.replace(/\D/g,''));
+
+        let maxDias = esBisiesto(anio) ? 366 : 365;
+        if(juliano < 1 || juliano > maxDias || anio < 1000){
+            contenedorFab.innerHTML = "<span style='color: #dc3545;'>Año o código incorrecto</span>";
+            return;
+        }
+
+        let fechaFabricacion = new Date(anio, 0);
+        fechaFabricacion.setDate(juliano);
+
+        let diaF = fechaFabricacion.getDate().toString().padStart(2, '0');
+        let mesF = (fechaFabricacion.getMonth() + 1).toString().padStart(2, '0');
+        contenedorFab.innerHTML = `<b>Fecha Real:</b> ${diaF}/${mesF}/${anio}`;
+
+        if (mesesVidaUtilActual > 0) {
+            let fechaVencimiento = new Date(fechaFabricacion.getTime());
+            fechaVencimiento.setMonth(fechaVencimiento.getMonth() + mesesVidaUtilActual);
+
+            let diaV = fechaVencimiento.getDate().toString().padStart(2, '0');
+            let mesV = (fechaVencimiento.getMonth() + 1).toString().padStart(2, '0');
+            let anioV = fechaVencimiento.getFullYear();
+
+            let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+            contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]})</span>`;
+        } else {
+            contenedorVen.innerHTML = `<b>Vence el:</b> <span style='color: #666;'>Escanea un producto con vida útil primero</span>`;
+        }
+    }
+
+    window.onload = cargarDatosYArrancar;
+</script>
+</body>
+</html>
