@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
+    <!-- Librería ultraligera para procesar archivos Excel (.xlsx) nativamente -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -35,6 +37,33 @@
             display: block;
             margin: 0 auto 15px;
         }
+
+        /* Bloque de carga de Excel superior */
+        .seccion-carga-excel {
+            background: #f1f3f5;
+            border: 1px dashed #ff6a00;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 15px;
+        }
+        .seccion-carga-excel label {
+            display: block;
+            font-size: 13px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .seccion-carga-excel input[type="file"] {
+            font-size: 12px;
+            padding: 5px;
+            width: 100%;
+            box-sizing: border-box;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
         h2 { 
             color: #ff6a00; 
             margin-top: 0; 
@@ -140,6 +169,12 @@
 <div class="container">
     <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" class="logo">
     
+    <!-- CARGADOR DE EXCEL SUPERIOR SIMPLE -->
+    <div class="seccion-carga-excel">
+        <label for="excel-input">📁 Cargar archivo Excel de FV (Col A: SKU | Col B: Desc | Col E: Vida):</label>
+        <input type="file" id="excel-input" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
+    </div>
+
     <h2>FECHA DE VENCIMIENTO</h2>
     <p>Escanea o digita el SKU</p>
 
@@ -154,7 +189,7 @@
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil (meses):</b> <span id="vida-val" class="resaltado">---</span></div>
     </div>
-    <div id="txt-status" class="info-status">Sincronizando con GitHub...</div>
+    <div id="txt-status" class="info-status">Esperando datos...</div>
 
     <div class="seccion-juliana">
         <h2>Consulta Juliana + Vencimiento</h2>
@@ -173,23 +208,54 @@
 </div>
 
 <script>
-    let eanASkuMap = {};       // Mapa EAN -> { SKU, Descripcion } (Desde JSON General)
-    let maestroSkuMap = {};    // Mapa SKU -> { SKU, Descripcion, VidaUtil } (Desde Excel "Data...")
+    let eanASkuMap = {};       // Catálogo general EAN -> { SKU, Descripcion }
+    let maestroSkuMap = {};    // Maestro del Excel: SKU -> { SKU, Descripcion, VidaUtil }
     let mesesVidaUtilActual = 0;
 
     function limpiarCodigo(codigo) {
         return String(codigo).replace(/\D/g, '').trim();
     }
 
-    function cargarDatosYArrancar() {
-        let timestamp = new Date().getTime(); // Anti-caché
+    function actualizarHoraStatus(horaGuardada) {
+        let horaStr = horaGuardada || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
+    }
 
-        // 1. Cargar JSON General (Contiene EAN, SKU y DESCRIPCIÓN de todos los productos)
-        let promesaGeneral = fetch(`Data_General.json?v=${timestamp}`)
-            .then(res => res.ok ? res.json() : fetch(`data_general.json?v=${timestamp}`).then(r => r.json()))
-            .then(dataGeneral => {
-                if (Array.isArray(dataGeneral)) {
-                    dataGeneral.forEach(item => {
+    // Inicialización: Carga datos guardados previamente en memoria local
+    function inicializarMemoriaYArchivos() {
+        let maestroGuardado = localStorage.getItem('promart_maestro_sku');
+        let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
+
+        if (maestroGuardado) {
+            try {
+                maestroSkuMap = JSON.parse(maestroGuardado);
+                actualizarHoraStatus(horaGuardada);
+            } catch (e) {
+                console.warn("Reinicializando memoria...");
+            }
+        }
+
+        cargarArchivosBase();
+    }
+
+    // Carga de catálogo base dinámico desde archivos JSON (01.json, 02.json, etc.)
+    function cargarArchivosBase() {
+        let timestamp = new Date().getTime();
+        let peticiones = [];
+
+        for (let i = 1; i <= 50; i++) {
+            let numStr = i < 10 ? `0${i}` : `${i}`;
+            peticiones.push(
+                fetch(`${numStr}.json?v=${timestamp}`)
+                .then(res => res.ok ? res.json() : null)
+                .catch(() => null)
+            );
+        }
+
+        Promise.all(peticiones).then(listas => {
+            listas.forEach(lista => {
+                if (lista && Array.isArray(lista)) {
+                    lista.forEach(item => {
                         let skuVal = item["SKU"] || item["sku"] || item["Articulo"] || "";
                         let eanVal = item["EAN"] || item["ean"] || item["Código de barras"] || item["CÃ³digo de barras"] || "";
                         let descVal = item["DESCRIPCIÓN"] || item["DESCRIPCION"] || item["Descripción"] || item["Descrip Articulo"] || "";
@@ -206,68 +272,98 @@
                         }
                     });
                 }
-            })
-            .catch(() => console.log("Nota: Buscando catálogo general..."));
-
-        // 2. Cargar Excel Maestro "Data..." (Contiene Columna A: SKU, Columna B: Descrip Articulo, Columna E: VIDA UTIL)
-        let promesaMaestro = fetch(`Data.json?v=${timestamp}`)
-            .then(res => res.ok ? res.json() : fetch(`data.json?v=${timestamp}`).then(r => r.json()))
-            .then(dataMaestra => {
-                if (Array.isArray(dataMaestra)) {
-                    dataMaestra.forEach(item => {
-                        let skuVal = "", descVal = "", vidaVal = "0";
-
-                        for (let llave in item) {
-                            let keyMin = llave.toLowerCase();
-                            let valStr = String(item[llave]).trim();
-
-                            // Columna A (SKU)
-                            if ((keyMin.includes("sku") || keyMin.includes("art") || keyMin.includes("mat")) && valStr.length >= 4 && valStr.length <= 8 && !isNaN(valStr)) {
-                                skuVal = valStr;
-                            }
-                            // Columna B (Descripción)
-                            if (keyMin.includes("descrip") || (keyMin.includes("articulo") && valStr.match(/[a-zA-Z]/))) {
-                                descVal = valStr;
-                            }
-                            // Columna E (Vida Útil)
-                            if (keyMin.includes("vida") || keyMin.includes("util") || keyMin.includes("fv")) {
-                                vidaVal = valStr;
-                            }
-                        }
-
-                        let skuLimpio = limpiarCodigo(skuVal);
-                        if (skuLimpio) {
-                            maestroSkuMap[skuLimpio] = {
-                                sku: skuLimpio,
-                                descripcion: descVal || "Sin descripción",
-                                vidaUtil: vidaVal
-                            };
-                            let skuSinCeros = skuLimpio.replace(/^0+/, '');
-                            if (skuSinCeros !== skuLimpio && skuSinCeros !== "") {
-                                maestroSkuMap[skuSinCeros] = maestroSkuMap[skuLimpio];
-                            }
-                        }
-                    });
-                }
-            })
-            .catch(() => console.log("Cargando maestro de vida útil..."));
-
-        Promise.all([promesaGeneral, promesaMaestro])
-            .then(() => {
-                let ahora = new Date();
-                let horaStr = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
-                document.getElementById('input-escaneo').focus();
-            })
-            .catch(() => {
-                let ahora = new Date();
-                let horaStr = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
-                document.getElementById('input-escaneo').focus();
             });
+            if (!localStorage.getItem('promart_hora_actualizacion')) {
+                actualizarHoraStatus();
+            }
+            document.getElementById('input-escaneo').focus();
+        });
     }
 
-    // Disparo automático con láser Honeywell (Presiona Enter al escanear)
+    // PROCESADOR DIRECTO DEL EXCEL (.xlsx) SUBIDO
+    function procesarArchivoExcel(event) {
+        let file = event.target.files[0];
+        if (!file) return;
+
+        let reader = new FileReader();
+
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+            reader.onload = function (e) {
+                let data = new Uint8Array(e.target.result);
+                let workbook = XLSX.read(data, { type: 'array' });
+                let primeraHoja = workbook.SheetNames[0];
+                let jsonExcel = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja]);
+
+                procesarDatosDeExcel(jsonExcel);
+            };
+            reader.readAsArrayBuffer(file);
+        } else if (file.name.endsWith('.json')) {
+            reader.onload = function (e) {
+                try {
+                    let jsonExcel = JSON.parse(e.target.result);
+                    procesarDatosDeExcel(jsonExcel);
+                } catch (err) {
+                    alert("Error al leer el archivo JSON.");
+                }
+            };
+            reader.readAsText(file);
+        }
+    }
+
+    function procesarDatosDeExcel(filas) {
+        if (!Array.isArray(filas)) return;
+
+        maestroSkuMap = {}; // Reemplaza la data previa con la nueva
+
+        filas.forEach(item => {
+            let skuVal = "", descVal = "", vidaVal = "0";
+
+            for (let llave in item) {
+                let keyMin = llave.toLowerCase();
+                let valStr = String(item[llave]).trim();
+
+                // Identifica Columna A (SKU)
+                if ((keyMin.includes("sku") || keyMin.includes("art") || keyMin.includes("mat")) && valStr.length >= 4 && valStr.length <= 8 && !isNaN(valStr)) {
+                    skuVal = valStr;
+                }
+                // Identifica Columna B (Descripción)
+                if (keyMin.includes("descrip") || (keyMin.includes("articulo") && valStr.match(/[a-zA-Z]/))) {
+                    descVal = valStr;
+                }
+                // Identifica Columna E (Vida Útil)
+                if (keyMin.includes("vida") || keyMin.includes("util") || keyMin.includes("fv")) {
+                    vidaVal = valStr;
+                }
+            }
+
+            let skuLimpio = limpiarCodigo(skuVal);
+            if (skuLimpio) {
+                maestroSkuMap[skuLimpio] = {
+                    sku: skuLimpio,
+                    descripcion: descVal || "Sin descripción",
+                    vidaUtil: vidaVal
+                };
+                let skuSinCeros = skuLimpio.replace(/^0+/, '');
+                if (skuSinCeros !== skuLimpio && skuSinCeros !== "") {
+                    maestroSkuMap[skuSinCeros] = maestroSkuMap[skuLimpio];
+                }
+            }
+        });
+
+        // Guardado permanente en la memoria interna del navegador (localStorage)
+        let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        try {
+            localStorage.setItem('promart_maestro_sku', JSON.stringify(maestroSkuMap));
+            localStorage.setItem('promart_hora_actualizacion', horaActual);
+        } catch(e) {
+            console.warn("Memoria completa, operando en vivo.");
+        }
+
+        actualizarHoraStatus(horaActual);
+        document.getElementById('input-escaneo').focus();
+    }
+
+    // Evento del láser del Pocket Honeywell
     document.getElementById('input-escaneo').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             procesarBusquedaManual();
@@ -285,7 +381,7 @@
         let descripcionFinal = "";
         let vidaUtilFinal = "0";
 
-        // CASO A: Se escanea un EAN
+        // CASO A: Escaneo de EAN
         if (eanASkuMap[codigoLimpio]) {
             skuFinal = eanASkuMap[codigoLimpio].sku;
             descripcionFinal = eanASkuMap[codigoLimpio].descripcion;
@@ -297,23 +393,22 @@
             }
         }
 
-        // CASO B: Se digita o busca directamente por SKU
+        // CASO B: Digitación directa de SKU
         if (!skuFinal) {
             skuFinal = codigoLimpio;
         }
 
-        // CRUCE CON EXCEL MAESTRO "Data..."
+        // CRUCE CON LA DATA DEL EXCEL PERSISTENTE
         let infoMaestra = maestroSkuMap[skuFinal] || maestroSkuMap[skuFinal.replace(/^0+/, '')];
 
         if (infoMaestra) {
-            // Si el maestro trae descripción la usa, si no, usa la del JSON General
             if (infoMaestra.descripcion && infoMaestra.descripcion !== "Sin descripción") {
                 descripcionFinal = infoMaestra.descripcion;
             }
             vidaUtilFinal = infoMaestra.vidaUtil;
         }
 
-        // PRESENTACIÓN DE RESULTADOS (SIEMPRE MUESTRA DESCRIPCIÓN)
+        // PRESENTACIÓN COMPLETA DE RESULTADOS
         if (infoMaestra || descripcionFinal) {
             document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${descripcionFinal || "Sin descripción"}`;
             document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${skuFinal}`;
@@ -404,7 +499,7 @@
         }
     }
 
-    window.onload = cargarDatosYArrancar;
+    window.onload = inicializarMemoriaYArchivos;
 </script>
 </body>
 </html>
