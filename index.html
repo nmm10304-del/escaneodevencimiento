@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
-    <!-- Librería ultraligera para procesar archivos Excel (.xlsx) -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -159,7 +157,6 @@
     <p>Escanea o digita el SKU</p>
 
     <div class="seccion-lectura">
-        <!-- Input con bloqueo estricto a SOLO NÚMEROS -->
         <input type="tel" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off" onkeydown="bloquearLetras(event)" onpaste="limpiarTextoPegado(event)" oninput="limpiarValorDirecto(this)">
         <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
     </div>
@@ -170,7 +167,7 @@
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil:</b> <span id="vida-val" class="no-registra">---</span></div>
     </div>
-    <div id="txt-status" class="info-status">Sincronizando con GitHub...</div>
+    <div id="txt-status" class="info-status">✅ Sistema listo</div>
 
     <div class="seccion-juliana">
         <h2>Consulta Juliana + Vencimiento</h2>
@@ -216,24 +213,33 @@
         return String(codigo).replace(/\D/g, '').trim();
     }
 
-    function actualizarHoraStatus(horaStr) {
-        document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
-    }
+    function inicializarSistemaEstatico() {
+        // 1. CARGA AL TOQUE DESDE MEMORIA LOCAL (Cero demoras al recargar la página)
+        let cacheGuardada = localStorage.getItem('promart_maestro_json');
+        let versionGuardada = localStorage.getItem('promart_version_json');
+        
+        if (cacheGuardada) {
+            try {
+                maestroSkuMap = JSON.parse(cacheGuardada);
+                if (versionGuardada) {
+                    document.getElementById('txt-status').innerText = `✅ Base FV activa (${versionGuardada})`;
+                }
+            } catch(e) {}
+        }
 
-    function inicializarSistemaCentral() {
         cargarArchivosBase();
-        cargarMaestroDesdeNube();
         configurarEventosJulianosMóviles();
+
+        // 2. COMPROBACIÓN ÚNICA EN SEGUNDO PLANO: Solo actualiza si cambiaron el archivo en GitHub
+        verificarCambiosEnGitHub();
     }
 
     function cargarArchivosBase() {
-        let timestamp = new Date().getTime();
         let peticiones = [];
-
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
-                fetch(`${numStr}.json?v=${timestamp}`)
+                fetch(`${numStr}.json`)
                 .then(res => res.ok ? res.json() : null)
                 .catch(() => null)
             );
@@ -244,8 +250,8 @@
                 if (lista && Array.isArray(lista)) {
                     lista.forEach(item => {
                         let skuVal = item["SKU"] || item["sku"] || item["Articulo"] || "";
-                        let eanVal = item["EAN"] || item["ean"] || item["Código de barras"] || item["CÃ³digo de barras"] || "";
-                        let descVal = item["DESCRIPCIÓN"] || item["DESCRIPCION"] || item["Descripción"] || item["Descrip Articulo"] || "";
+                        let eanVal = item["EAN"] || item["ean"] || item["Código de barras"] || "";
+                        let descVal = item["DESCRIPCIÓN"] || item["DESCRIPCION"] || item["Descripción"] || "";
 
                         let skuLimpio = limpiarCodigo(skuVal);
                         let eanLimpio = limpiarCodigo(eanVal);
@@ -264,45 +270,38 @@
         });
     }
 
-    // MULTI-INTENTO DE LECTURA DE EXCEL/JSON EN GITHUB
-    function cargarMaestroDesdeNube() {
+    // VERIFICA SI HAY UN NUEVO JSON EN GITHUB COMPARANDO FECHAS/VERSIONES
+    function verificarCambiosEnGitHub() {
         let ts = new Date().getTime();
-        let rutasPosibles = [`FV.xlsx?v=${ts}`, `FV.json?v=${ts}`, `fv.xlsx?v=${ts}`, `fv.json?v=${ts}`];
+        // Agregamos una marca de tiempo interna para consultar si GitHub tiene un archivo más reciente
+        fetch(`FV.json?check=${ts}`, { method: 'HEAD' })
+            .then(res => {
+                if (res.ok) {
+                    let ultimaModificacion = res.headers.get('last-modified') || String(ts);
+                    let versionLocal = localStorage.getItem('promart_version_json');
 
-        function intentarSiguienteRuta(index) {
-            if (index >= rutasPosibles.length) {
-                document.getElementById('txt-status').innerText = "⚠️ Sube el archivo FV.xlsx a tu GitHub";
-                return;
-            }
-
-            let url = rutasPosibles[index];
-
-            fetch(url)
-                .then(res => {
-                    if (!res.ok) throw new Error("No encontrado");
-                    return url.includes('.json') ? res.json() : res.arrayBuffer();
-                })
-                .then(data => {
-                    if (data instanceof ArrayBuffer) {
-                        let workbook = XLSX.read(new Uint8Array(data), { type: 'array' });
-                        let primeraHoja = workbook.SheetNames[0];
-                        let jsonExcel = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja]);
-                        procesarDatosMaestros(jsonExcel);
-                    } else {
-                        procesarDatosMaestros(data);
+                    // SOLO SI EL ARCHIVO EN GITHUB ES NUEVO, SE DESCARGA Y ACTUALIZA
+                    if (versionLocal !== ultimaModificacion) {
+                        fetch(`FV.json?v=${ts}`)
+                            .then(r => r.ok ? r.json() : null)
+                            .then(data => {
+                                if (data && Array.isArray(data)) {
+                                    procesarDatosMaestros(data);
+                                    localStorage.setItem('promart_maestro_json', JSON.stringify(maestroSkuMap));
+                                    localStorage.setItem('promart_version_json', ultimaModificacion);
+                                    
+                                    let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                    document.getElementById('txt-status').innerText = `✅ Base FV actualizada desde GitHub (${horaActual})`;
+                                }
+                            });
                     }
-                })
-                .catch(() => {
-                    intentarSiguienteRuta(index + 1);
-                });
-        }
-
-        intentarSiguienteRuta(0);
+                }
+            })
+            .catch(() => {});
     }
 
     function procesarDatosMaestros(filas) {
         if (!Array.isArray(filas)) return;
-
         maestroSkuMap = {};
 
         filas.forEach(item => {
@@ -336,9 +335,6 @@
                 }
             }
         });
-
-        let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        actualizarHoraStatus(horaActual);
     }
 
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
@@ -519,10 +515,10 @@
         let anioV = fechaVencimiento.getFullYear();
 
         let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-        contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]})</span>`;
+        contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()-1 < 0 ? 0 : fechaVencimiento.getMonth()]} )</span>`;
     }
 
-    window.onload = inicializarSistemaCentral;
+    window.onload = inicializarSistemaEstatico;
 </script>
 </body>
 </html>
