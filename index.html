@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
-    <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -24,7 +23,7 @@
         .container {
             max-width: 480px;
             width: 100%;
-            background: rgba(255, 255, 255, 0.94);
+            background: rgba(255, 255, 255, 0.95);
             padding: 25px;
             border-radius: 12px;
             box-shadow: 0 6px 20px rgba(0,0,0,0.25);
@@ -44,29 +43,48 @@
             padding-bottom: 8px;
         }
         p { color: #444; font-size: 14px; margin: 5px 0 15px; }
-        #reader {
-            width: 100%;
-            border-radius: 8px;
-            overflow: hidden;
-            background: #000;
-            margin-bottom: 12px;
-            min-height: 240px;
-        }
         
-        .btn-linterna {
-            background: #212529;
+        .seccion-lectura {
+            background: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #ff6a00;
+            margin-bottom: 15px;
+        }
+
+        .input-pocket {
+            width: 100%;
+            padding: 14px;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            border: 2px solid #333;
+            border-radius: 8px;
+            box-sizing: border-box;
+            outline: none;
+            color: #212529;
+            background-color: #f8f9fa;
+        }
+        .input-pocket:focus {
+            border-color: #ff6a00;
+            background-color: #fff;
+            box-shadow: 0 0 8px rgba(255, 106, 0, 0.4);
+        }
+
+        .btn-buscar {
+            background: #ff6a00;
             color: white;
             border: none;
             padding: 12px;
-            font-size: 15px;
+            font-size: 16px;
             border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
-            margin-bottom: 15px;
+            margin-top: 10px;
             width: 100%;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            transition: background 0.2s;
         }
+        .btn-buscar:hover { background: #e65c00; }
 
         .resultado-box {
             margin-top: 15px;
@@ -97,18 +115,6 @@
             font-size: 14px;
             box-sizing: border-box;
         }
-        button {
-            background: #ff6a00;
-            color: white;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 15px;
-            transition: background 0.2s;
-        }
-        button:hover {
-            background: #e65c00;
-        }
         .panel-resultado-juliano {
             margin-top: 12px;
             background: #fff;
@@ -126,9 +132,7 @@
             -webkit-appearance: none;
             margin: 0;
         }
-        input[type=number] {
-            -moz-appearance: textfield;
-        }
+        input[type=number] { -moz-appearance: textfield; }
     </style>
 </head>
 <body>
@@ -136,15 +140,16 @@
 <div class="container">
     <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" class="logo">
     
-    <h2>ESCANEA EL PRODUCTO</h2>
-    <p>Apunta al código EAN con la cámara trasera</p>
-    
-    <div id="reader"></div>
+    <h2>CONSULTA POCKET / SKU</h2>
+    <p>Escanea con el láser del Pocket Honeywell o digita el SKU/EAN</p>
 
-    <button id="btn-flash" class="btn-linterna" onclick="controlarFlashNativo()">💡 ENCENDER LINTERNA</button>
+    <div class="seccion-lectura">
+        <input type="text" id="input-escaneo" class="input-pocket" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off">
+        <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
+    </div>
 
     <div class="resultado-box">
-        <h3>Resultado de escaneo:</h3>
+        <h3>Resultado de la Búsqueda:</h3>
         <div id="txt-desc" class="dato"><b>Descripción:</b> <span class="error">---</span></div>
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil (meses):</b> <span id="vida-val" class="resaltado">---</span></div>
@@ -158,7 +163,7 @@
         <input type="number" id="anio" placeholder="Inserte el año (Ej: 2026)" oninput="this.value=this.value.slice(0,4)">
         <input type="number" id="juliano" placeholder="Inserte los 3 dígitos (Ej: 198)" oninput="this.value=this.value.slice(0,3)">
         
-        <button onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
+        <button class="btn-buscar" onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
         
         <div class="panel-resultado-juliano">
             <div id="res-fabricacion" class="linea-res"><b>Fecha Real:</b> Esperando datos...</div>
@@ -169,12 +174,9 @@
 
 <script>
     let baseDatosUnificada = {};
-    let html5QrCode;
     let mesesVidaUtilActual = 0;
-    let flashActivo = false;
-    let videoTrackNativo = null;
 
-    function limpiarCodigoEan(codigo) {
+    function limpiarCodigo(codigo) {
         return String(codigo).replace(/\D/g, '').trim();
     }
 
@@ -182,7 +184,6 @@
         let peticiones = [];
         let archivosEncontrados = 0;
 
-        // Bucle configurado exactamente hasta el archivo 43 (FV-43.json)
         for (let i = 1; i <= 43; i++) {
             peticiones.push(
                 fetch(`FV-${i}.json`)
@@ -191,9 +192,7 @@
                     archivosEncontrados++;
                     return res.json();
                 })
-                .catch(() => {
-                    return null;
-                })
+                .catch(() => null)
             );
         }
 
@@ -204,16 +203,30 @@
             todasLasListas.forEach(lista => {
                 if (lista && Array.isArray(lista)) {
                     lista.forEach(item => {
-                        let eanOriginal = item["CÃ³digo de barras"] || item["Código de barras"] || item["EAN"] || item["Codigo de barras"] || item["CÓDIGO DE BARRAS"] || item["CÓDIGO"] || item["CODIGO"] || item["SKU"];
+                        let eanOriginal = item["CÃ³digo de barras"] || item["Código de barras"] || item["EAN"] || item["Codigo de barras"] || item["CÓDIGO DE BARRAS"] || item["CÓDIGO"] || item["CODIGO"];
+                        let skuOriginal = item["Articulo"] || item["ArtÃculo"] || item["SKU"] || item["sku"] || item["MAT"] || item["Material"];
+
+                        // Indexar por Código de Barras / EAN
                         if (eanOriginal) {
-                            let eanNumerico = limpiarCodigoEan(eanOriginal);
+                            let eanNumerico = limpiarCodigo(eanOriginal);
                             if (eanNumerico) {
                                 baseDatosUnificada[eanNumerico] = item;
                                 totalProductos++;
-                                
                                 let eanSinCeros = eanNumerico.replace(/^0+/, '');
                                 if (eanSinCeros !== eanNumerico && eanSinCeros !== "") {
                                     baseDatosUnificada[eanSinCeros] = item;
+                                }
+                            }
+                        }
+
+                        // Indexar también directamente por SKU
+                        if (skuOriginal) {
+                            let skuNumerico = limpiarCodigo(skuOriginal);
+                            if (skuNumerico) {
+                                baseDatosUnificada[skuNumerico] = item;
+                                let skuSinCeros = skuNumerico.replace(/^0+/, '');
+                                if (skuSinCeros !== skuNumerico && skuSinCeros !== "") {
+                                    baseDatosUnificada[skuSinCeros] = item;
                                 }
                             }
                         }
@@ -221,94 +234,46 @@
                 }
             });
 
-            // Mostrará "¡43 listas mapeadas correctamente!" en la barra de estado inferior
-            document.getElementById('txt-status').innerText = `✅ ¡${archivosEncontrados} listas mapeadas correctamente! (${totalProductos} artículos listos).`;
-            arrancarCamaraUniversal();
+            document.getElementById('txt-status').innerText = `✅ ¡${archivosEncontrados} listas cargadas! (${totalProductos} artículos listos).`;
+            
+            // Enfocar la caja de texto automáticamente
+            document.getElementById('input-escaneo').focus();
         })
         .catch(err => {
             console.error(err);
-            document.getElementById('txt-status').innerHTML = "<span class='error'>⚠️ Error crítico al consolidar datos de memoria.</span>";
-            arrancarCamaraUniversal();
+            document.getElementById('txt-status').innerHTML = "<span class='error'>⚠️ Error crítico al consolidar datos.</span>";
         });
     }
 
-    function arrancarCamaraUniversal() {
-        html5QrCode = new Html5Qrcode("reader");
-        const camaraConfig = { facingMode: { exact: "environment" } };
-        const escanerConfig = { fps: 15, qrbox: { width: 280, height: 160 } };
-
-        html5QrCode.start(camaraConfig, escanerConfig, onScanSuccess)
-        .then(() => capturarCanalVideoNativo())
-        .catch(err => {
-            html5QrCode.start({ facingMode: "environment" }, escanerConfig, onScanSuccess)
-            .then(() => capturarCanalVideoNativo())
-            .catch(() => {});
-        });
-    }
-
-    function capturarCanalVideoNativo() {
-        setTimeout(() => {
-            try {
-                const elementoVideo = document.querySelector("#reader video");
-                if (elementoVideo && elementoVideo.srcObject) {
-                    videoTrackNativo = elementoVideo.srcObject.getVideoTracks()[0];
-                }
-            } catch (e) {
-                console.warn(e);
-            }
-        }, 1200);
-    }
-
-    function controlarFlashNativo() {
-        const boton = document.getElementById("btn-flash");
-        if (!videoTrackNativo) {
-            const elementoVideo = document.querySelector("#reader video");
-            if (elementoVideo && elementoVideo.srcObject) {
-                videoTrackNativo = elementoVideo.srcObject.getVideoTracks()[0];
-            }
+    // Evento al presionar 'Enter' (Pistola Honeywell escanea y manda Enter)
+    document.getElementById('input-escaneo').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') {
+            procesarBusquedaManual();
         }
-        if (!videoTrackNativo) {
-            alert("Espera a que la cámara encienda por completo.");
-            return;
-        }
-        flashActivo = !flashActivo;
-        videoTrackNativo.applyConstraints({ advanced: [{ torch: flashActivo }] })
-        .then(() => {
-            if (flashActivo) {
-                boton.innerHTML = "🚫 APAGAR LINTERNA";
-                boton.style.background = "#dc3545";
-            } else {
-                boton.innerHTML = "💡 ENCENDER LINTERNA";
-                boton.style.background = "#212529";
-            }
-        })
-        .catch(() => {
-            flashActivo = !flashActivo;
-            alert("Control de linterna no soportado en este navegador.");
-        });
-    }
+    });
 
-    function onScanSuccess(decodedText, decodedResult) {
-        let eanLecturaOriginal = decodedText.trim();
-        let eanNumericoCamara = limpiarCodigoEan(eanLecturaOriginal);
+    function procesarBusquedaManual() {
+        let inputElem = document.getElementById('input-escaneo');
+        let lecturaIngresada = inputElem.value.trim();
         
-        let producto = baseDatosUnificada[eanNumericoCamara];
+        if (!lecturaIngresada) return;
+
+        let codigoLimpio = limpiarCodigo(lecturaIngresada);
+        let producto = baseDatosUnificada[codigoLimpio];
 
         if (!producto) {
-            let eanSinCeros = eanNumericoCamara.replace(/^0+/, '');
-            producto = baseDatosUnificada[eanSinCeros];
+            let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
+            producto = baseDatosUnificada[codigoSinCeros];
         }
 
-        if (!producto && eanNumericoCamara.length >= 10) {
-            let eanSinVerificador = eanNumericoCamara.slice(0, -1);
-            producto = baseDatosUnificada[eanSinVerificador] || baseDatosUnificada[eanSinVerificador.replace(/^0+/, '')];
-        }
-
+        // Búsqueda inteligente de coincidencias
         if (!producto) {
-            for (let codigoRegistrado in baseDatosUnificada) {
-                if (eanNumericoCamara.includes(codigoRegistrado) && codigoRegistrado.length >= 8) {
-                    producto = baseDatosUnificada[codigoRegistrado];
-                    break;
+            for (let clave in baseDatosUnificada) {
+                if (clave === codigoLimpio || clave.endsWith(codigoLimpio) || codigoLimpio.endsWith(clave)) {
+                    if (clave.length >= 5) {
+                        producto = baseDatosUnificada[clave];
+                        break;
+                    }
                 }
             }
         }
@@ -335,19 +300,7 @@
                 }
             }
 
-            if (sku === "---") {
-                for (let llave in producto) {
-                    let valor = String(producto[llave]).trim();
-                    if (valor.length >= 5 && valor.length <= 7 && !isNaN(valor) && valor !== eanNumericoCamara) {
-                        sku = valor;
-                        break;
-                    }
-                }
-            }
-
-            if (sku === "---") {
-                sku = "Desconocido";
-            }
+            if (sku === "---") sku = codigoLimpio;
 
             document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${descripcion}`;
             document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${sku}`;
@@ -382,11 +335,15 @@
                 convertirFechaJulianaCompleta();
             }
         } else {
-            document.getElementById('txt-desc').innerHTML = `<span class='error'>Código: ${eanLecturaOriginal} <br>Producto no registrado</span>`;
+            document.getElementById('txt-desc').innerHTML = `<span class='error'>Código/SKU: ${lecturaIngresada} <br>Producto no registrado</span>`;
             document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ---`;
             document.getElementById('vida-val').innerText = "---";
             mesesVidaUtilActual = 0;
         }
+
+        // Limpiar el campo y mantener el foco listo para el siguiente disparo del Honeywell
+        inputElem.value = "";
+        inputElem.focus();
     }
 
     function esBisiesto(anio) {
