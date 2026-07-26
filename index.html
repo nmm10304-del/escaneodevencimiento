@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
-    <!-- Librería ultraligera para procesar archivos Excel (.xlsx) nativamente -->
+    <!-- Librería para procesar Excel (.xlsx) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body {
@@ -32,36 +32,28 @@
             text-align: center;
             box-sizing: border-box;
         }
+        
+        /* Logo interactivo (Cargador oculto en PC) */
         .logo {
             width: 150px;
             display: block;
             margin: 0 auto 15px;
+            transition: transform 0.2s;
         }
 
-        /* Bloque de carga de Excel superior */
-        .seccion-carga-excel {
-            background: #f1f3f5;
-            border: 1px dashed #ff6a00;
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 15px;
+        /* Solo en PC muestra el cursor de mano e interactividad */
+        @media (min-width: 769px) {
+            .logo-pc-clickable {
+                cursor: pointer;
+            }
+            .logo-pc-clickable:hover {
+                transform: scale(1.05);
+            }
         }
-        .seccion-carga-excel label {
-            display: block;
-            font-size: 13px;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 5px;
-        }
-        .seccion-carga-excel input[type="file"] {
-            font-size: 12px;
-            padding: 5px;
-            width: 100%;
-            box-sizing: border-box;
-            background: #fff;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            cursor: pointer;
+
+        /* Ocultar el input file real */
+        #excel-input-oculto {
+            display: none;
         }
 
         h2 { 
@@ -135,13 +127,13 @@
             border-top: 2px dashed #ccc;
             text-align: center;
         }
-        input, button {
+        input {
             width: 100%;
             padding: 11px;
             margin-top: 10px;
             border-radius: 6px;
             border: 1px solid #ccc;
-            font-size: 14px;
+            font-size: 15px;
             box-sizing: border-box;
         }
         .panel-resultado-juliano {
@@ -167,19 +159,18 @@
 <body>
 
 <div class="container">
-    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" class="logo">
+    <!-- LOGO PROMART: En PC actúa como cargador oculto -->
+    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo logo-pc-clickable" onclick="activarCargadorOcultoPC()" title="Cargar nuevo Excel (Solo PC)">
     
-    <!-- CARGADOR DE EXCEL SUPERIOR SIMPLE -->
-    <div class="seccion-carga-excel">
-        <label for="excel-input">📁 Cargar archivo Excel de FV (Col A: SKU | Col B: Desc | Col E: Vida):</label>
-        <input type="file" id="excel-input" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
-    </div>
+    <!-- Input oculto para cargar Excel -->
+    <input type="file" id="excel-input-oculto" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
 
     <h2>FECHA DE VENCIMIENTO</h2>
     <p>Escanea o digita el SKU</p>
 
     <div class="seccion-lectura">
-        <input type="text" id="input-escaneo" class="input-pocket" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off">
+        <!-- Teclado numérico forzado en móviles mediante inputmode="numeric" -->
+        <input type="text" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off">
         <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
     </div>
 
@@ -195,8 +186,9 @@
         <h2>Consulta Juliana + Vencimiento</h2>
         <p>Calcula la fecha real de fabricación y proyecta el vencimiento exacto</p>
         
-        <input type="number" id="anio" placeholder="Inserte el año (Ej: 2026)" oninput="this.value=this.value.slice(0,4)">
-        <input type="number" id="juliano" placeholder="Inserte los 3 dígitos (Ej: 198)" oninput="this.value=this.value.slice(0,3)">
+        <!-- Inputs numéricos estrictos con auto-cálculo al presionar Enter/Cambiar campo -->
+        <input type="number" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año (Ej: 2026)" oninput="limitarYCalcular(this, 4)">
+        <input type="number" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos (Ej: 198)" oninput="limitarYCalcular(this, 3)">
         
         <button class="btn-buscar" onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
         
@@ -208,8 +200,8 @@
 </div>
 
 <script>
-    let eanASkuMap = {};       // Catálogo general EAN -> { SKU, Descripcion }
-    let maestroSkuMap = {};    // Maestro del Excel: SKU -> { SKU, Descripcion, VidaUtil }
+    let eanASkuMap = {};       
+    let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
 
     function limpiarCodigo(codigo) {
@@ -221,7 +213,13 @@
         document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
     }
 
-    // Inicialización: Carga datos guardados previamente en memoria local
+    // Carga oculta activada al hacer clic en el Logo (Solo en PC)
+    function activarCargadorOcultoPC() {
+        if (window.innerWidth > 768) {
+            document.getElementById('excel-input-oculto').click();
+        }
+    }
+
     function inicializarMemoriaYArchivos() {
         let maestroGuardado = localStorage.getItem('promart_maestro_sku');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
@@ -238,7 +236,6 @@
         cargarArchivosBase();
     }
 
-    // Carga de catálogo base dinámico desde archivos JSON (01.json, 02.json, etc.)
     function cargarArchivosBase() {
         let timestamp = new Date().getTime();
         let peticiones = [];
@@ -280,7 +277,6 @@
         });
     }
 
-    // PROCESADOR DIRECTO DEL EXCEL (.xlsx) SUBIDO
     function procesarArchivoExcel(event) {
         let file = event.target.files[0];
         if (!file) return;
@@ -313,7 +309,7 @@
     function procesarDatosDeExcel(filas) {
         if (!Array.isArray(filas)) return;
 
-        maestroSkuMap = {}; // Reemplaza la data previa con la nueva
+        maestroSkuMap = {};
 
         filas.forEach(item => {
             let skuVal = "", descVal = "", vidaVal = "0";
@@ -322,15 +318,12 @@
                 let keyMin = llave.toLowerCase();
                 let valStr = String(item[llave]).trim();
 
-                // Identifica Columna A (SKU)
                 if ((keyMin.includes("sku") || keyMin.includes("art") || keyMin.includes("mat")) && valStr.length >= 4 && valStr.length <= 8 && !isNaN(valStr)) {
                     skuVal = valStr;
                 }
-                // Identifica Columna B (Descripción)
                 if (keyMin.includes("descrip") || (keyMin.includes("articulo") && valStr.match(/[a-zA-Z]/))) {
                     descVal = valStr;
                 }
-                // Identifica Columna E (Vida Útil)
                 if (keyMin.includes("vida") || keyMin.includes("util") || keyMin.includes("fv")) {
                     vidaVal = valStr;
                 }
@@ -350,7 +343,6 @@
             }
         });
 
-        // Guardado permanente en la memoria interna del navegador (localStorage)
         let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         try {
             localStorage.setItem('promart_maestro_sku', JSON.stringify(maestroSkuMap));
@@ -360,15 +352,29 @@
         }
 
         actualizarHoraStatus(horaActual);
+        alert("✅ Nuevo Excel de FV cargado y guardado correctamente.");
         document.getElementById('input-escaneo').focus();
     }
 
-    // Evento del láser del Pocket Honeywell
+    // Búsqueda al presionar Enter en el Pocket/Celular
     document.getElementById('input-escaneo').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             procesarBusquedaManual();
         }
     });
+
+    // Auto-cálculo inmediato en fecha Juliana al escribir o presionar Enter
+    document.getElementById('anio').addEventListener('keypress', function (e) { if (e.key === 'Enter') convertirFechaJulianaCompleta(); });
+    document.getElementById('juliano').addEventListener('keypress', function (e) { if (e.key === 'Enter') convertirFechaJulianaCompleta(); });
+    document.getElementById('anio').addEventListener('blur', convertirFechaJulianaCompleta);
+    document.getElementById('juliano').addEventListener('blur', convertirFechaJulianaCompleta);
+
+    function limitarYCalcular(elem, maxLen) {
+        if (elem.value.length > maxLen) {
+            elem.value = elem.value.slice(0, maxLen);
+        }
+        convertirFechaJulianaCompleta();
+    }
 
     function procesarBusquedaManual() {
         let inputElem = document.getElementById('input-escaneo');
@@ -381,7 +387,6 @@
         let descripcionFinal = "";
         let vidaUtilFinal = "0";
 
-        // CASO A: Escaneo de EAN
         if (eanASkuMap[codigoLimpio]) {
             skuFinal = eanASkuMap[codigoLimpio].sku;
             descripcionFinal = eanASkuMap[codigoLimpio].descripcion;
@@ -393,12 +398,10 @@
             }
         }
 
-        // CASO B: Digitación directa de SKU
         if (!skuFinal) {
             skuFinal = codigoLimpio;
         }
 
-        // CRUCE CON LA DATA DEL EXCEL PERSISTENTE
         let infoMaestra = maestroSkuMap[skuFinal] || maestroSkuMap[skuFinal.replace(/^0+/, '')];
 
         if (infoMaestra) {
@@ -408,7 +411,6 @@
             vidaUtilFinal = infoMaestra.vidaUtil;
         }
 
-        // PRESENTACIÓN COMPLETA DE RESULTADOS
         if (infoMaestra || descripcionFinal) {
             document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${descripcionFinal || "Sin descripción"}`;
             document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${skuFinal}`;
@@ -464,7 +466,8 @@
         let contenedorVen = document.getElementById("res-vencimiento");
 
         if(anioInput === "" || julianoInput === ""){
-            contenedorFab.innerHTML = "<span style='color: #dc3545;'>Completa los campos</span>";
+            contenedorFab.innerHTML = "<b>Fecha Real:</b> Esperando datos...";
+            contenedorVen.innerHTML = "<b>Vence el:</b> ---";
             return;
         }
 
@@ -474,6 +477,7 @@
         let maxDias = esBisiesto(anio) ? 366 : 365;
         if(juliano < 1 || juliano > maxDias || anio < 1000){
             contenedorFab.innerHTML = "<span style='color: #dc3545;'>Año o código incorrecto</span>";
+            contenedorVen.innerHTML = "<b>Vence el:</b> ---";
             return;
         }
 
