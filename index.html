@@ -122,7 +122,7 @@
         .resultado-box h3 { margin: 0 0 10px 0; color: #ff6a00; font-size: 16px; font-weight: bold; }
         .dato { font-size: 16px; margin: 8px 0; color: #333; word-break: break-word; }
         .resaltado { font-weight: bold; color: #28a745; font-size: 18px; }
-        .no-registra { font-weight: bold; color: #6c757d; font-size: 16px; }
+        .no-registra { font-weight: bold; color: #dc3545; font-size: 16px; }
         .error { color: #dc3545; font-weight: bold; }
         .info-status { font-size: 13px; color: #28a745; text-align: center; margin-top: 10px; font-weight: bold; }
 
@@ -179,8 +179,8 @@
     <p>Escanea o digita el SKU</p>
 
     <div class="seccion-lectura">
-        <!-- Input con filtro estricto a SOLO NÚMEROS y teclado numérico forzado -->
-        <input type="text" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off" oninput="filtrarSoloNumeros(this)">
+        <!-- Input con bloqueo estricto a SOLO NÚMEROS -->
+        <input type="tel" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off" onkeydown="bloquearLetras(event)" onpaste="limpiarTextoPegado(event)" oninput="limpiarValorDirecto(this)">
         <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
     </div>
 
@@ -203,8 +203,8 @@
         <button id="btn-calcular-juliano" class="btn-buscar" disabled onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
         
         <div class="panel-resultado-juliano">
-            <div id="res-fabricacion" class="linea-res"><b>Fecha Real:</b> Esperando producto con vida útil...</div>
-            <div id="res-vencimiento" class="linea-res"><b>Vence el:</b> ---</div>
+            <div id="res-fabricacion" class="linea-res"><b>Fecha Real:</b> ---</div>
+            <div id="res-vencimiento" class="linea-res"><b>Vence el:</b> <span style="color: #666;">Escanea un producto con vida útil primero</span></div>
         </div>
     </div>
 </div>
@@ -214,8 +214,24 @@
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
 
-    // Filtro para impedir cualquier carácter que no sea número
-    function filtrarSoloNumeros(elem) {
+    // BLOQUEO ESTRICTO DE LETRAS
+    function bloquearLetras(e) {
+        let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (permitidos.includes(e.key)) return;
+
+        if (!/^[0-9]$/.test(e.key)) {
+            e.preventDefault();
+        }
+    }
+
+    function limpiarTextoPegado(e) {
+        let textoPegado = (e.clipboardData || window.clipboardData).getData('text');
+        if (!/^\d+$/.test(textoPegado)) {
+            e.preventDefault();
+        }
+    }
+
+    function limpiarValorDirecto(elem) {
         elem.value = elem.value.replace(/\D/g, '');
     }
 
@@ -228,7 +244,6 @@
         document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
     }
 
-    // Carga oculta en el logo activada SOLO si es PC
     function activarCargadorOcultoPC() {
         let esMovil = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
         if (!esMovil) {
@@ -367,12 +382,10 @@
             console.warn("Memoria interna completa.");
         }
 
-        // Mensaje discreto en la barra inferior sin alertas emergentes
         document.getElementById('txt-status').innerText = `✅ Base de datos de FV actualizada correctamente (${horaActual})`;
         document.getElementById('input-escaneo').focus();
     }
 
-    // Eventos del scanner Pocket Honeywell
     document.getElementById('input-escaneo').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             procesarBusquedaManual();
@@ -398,14 +411,16 @@
             inputAnio.disabled = false;
             inputJuliano.disabled = false;
             btnCalcular.disabled = false;
+            document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> Ingrese datos";
+            document.getElementById('res-vencimiento').innerHTML = "<b>Vence el:</b> ---";
         } else {
             inputAnio.disabled = true;
             inputJuliano.disabled = true;
             btnCalcular.disabled = true;
             inputAnio.value = "";
             inputJuliano.value = "";
-            document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> Esperando producto con vida útil...";
-            document.getElementById('res-vencimiento').innerHTML = "<b>Vence el:</b> ---";
+            document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> ---";
+            document.getElementById('res-vencimiento').innerHTML = "<b>Vence el:</b> <span style='color: #666;'>Escanea un producto con vida útil primero</span>";
         }
     }
 
@@ -451,6 +466,7 @@
             let numerosExtraidos = String(vidaUtilFinal).replace(/\D/g, '');
             mesesVidaUtilActual = numerosExtraidos !== "" ? parseInt(numerosExtraidos) : 0;
             
+            // REGLA CLAVE: SI ES 0 O MENOR, MUESTRA "No registra vida útil"
             if (mesesVidaUtilActual > 0) {
                 let aniosCompletos = Math.floor(mesesVidaUtilActual / 12);
                 let mesesRestantes = mesesVidaUtilActual % 12;
@@ -471,11 +487,11 @@
                 
                 document.getElementById('vida-val').className = "resaltado";
                 document.getElementById('vida-val').innerText = `${mesesVidaUtilActual} meses ${textoParentesis}`;
-                controlarEstadoCalculadora(true); // Desbloquea la calculadora Juliana
+                controlarEstadoCalculadora(true);
             } else {
                 document.getElementById('vida-val').className = "no-registra";
                 document.getElementById('vida-val').innerText = "No registra vida útil";
-                controlarEstadoCalculadora(false); // Bloquea la calculadora Juliana
+                controlarEstadoCalculadora(false);
             }
             
             if(document.getElementById("anio").value !== "" && document.getElementById("juliano").value !== "") {
@@ -485,9 +501,9 @@
             document.getElementById('txt-desc').innerHTML = `<span class='error'>Código/SKU: ${lecturaIngresada} <br>Producto no registrado</span>`;
             document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ---`;
             document.getElementById('vida-val').className = "no-registra";
-            document.getElementById('vida-val').innerText = "---";
+            document.getElementById('vida-val').innerText = "No registra vida útil";
             mesesVidaUtilActual = 0;
-            controlarEstadoCalculadora(false); // Bloquea la calculadora Juliana
+            controlarEstadoCalculadora(false);
         }
 
         inputElem.value = "";
