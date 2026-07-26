@@ -170,7 +170,7 @@
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil:</b> <span id="vida-val" class="no-registra">---</span></div>
     </div>
-    <div id="txt-status" class="info-status">Sincronizando con la nube...</div>
+    <div id="txt-status" class="info-status">Sincronizando con GitHub...</div>
 
     <div class="seccion-juliana">
         <h2>Consulta Juliana + Vencimiento</h2>
@@ -193,7 +193,6 @@
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
 
-    // BLOQUEO ESTRICTO DE LETRAS
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
         if (permitidos.includes(e.key)) return;
@@ -227,7 +226,6 @@
         configurarEventosJulianosMóviles();
     }
 
-    // Carga de catálogo general EAN -> SKU
     function cargarArchivosBase() {
         let timestamp = new Date().getTime();
         let peticiones = [];
@@ -266,25 +264,40 @@
         });
     }
 
-    // CARGA CENTRALIZADA: Todos los dispositivos (PC y celulares) leen el mismo archivo en la nube
+    // MULTI-INTENTO DE LECTURA DE EXCEL/JSON EN GITHUB
     function cargarMaestroDesdeNube() {
-        let timestamp = new Date().getTime();
-        // Busca FV.json o Data.json directamente en tu repositorio
-        fetch(`FV.json?v=${timestamp}`)
-            .then(res => res.ok ? res.json() : fetch(`FV.xlsx?v=${timestamp}`).then(r => r.arrayBuffer()))
-            .then(data => {
-                if (data instanceof ArrayBuffer) {
-                    let workbook = XLSX.read(new Uint8Array(data), { type: 'array' });
-                    let primeraHoja = workbook.SheetNames[0];
-                    let jsonExcel = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja]);
-                    procesarDatosMaestros(jsonExcel);
-                } else {
-                    procesarDatosMaestros(data);
-                }
-            })
-            .catch(() => {
-                document.getElementById('txt-status').innerText = "✅ Sistema listo para operar";
-            });
+        let ts = new Date().getTime();
+        let rutasPosibles = [`FV.xlsx?v=${ts}`, `FV.json?v=${ts}`, `fv.xlsx?v=${ts}`, `fv.json?v=${ts}`];
+
+        function intentarSiguienteRuta(index) {
+            if (index >= rutasPosibles.length) {
+                document.getElementById('txt-status').innerText = "⚠️ Sube el archivo FV.xlsx a tu GitHub";
+                return;
+            }
+
+            let url = rutasPosibles[index];
+
+            fetch(url)
+                .then(res => {
+                    if (!res.ok) throw new Error("No encontrado");
+                    return url.includes('.json') ? res.json() : res.arrayBuffer();
+                })
+                .then(data => {
+                    if (data instanceof ArrayBuffer) {
+                        let workbook = XLSX.read(new Uint8Array(data), { type: 'array' });
+                        let primeraHoja = workbook.SheetNames[0];
+                        let jsonExcel = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja]);
+                        procesarDatosMaestros(jsonExcel);
+                    } else {
+                        procesarDatosMaestros(data);
+                    }
+                })
+                .catch(() => {
+                    intentarSiguienteRuta(index + 1);
+                });
+        }
+
+        intentarSiguienteRuta(0);
     }
 
     function procesarDatosMaestros(filas) {
@@ -328,7 +341,6 @@
         actualizarHoraStatus(horaActual);
     }
 
-    // Eventos para Pocket Honeywell y Móviles
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             procesarBusquedaManual();
