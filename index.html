@@ -173,8 +173,8 @@
 </div>
 
 <script>
-    let eanASkuMap = {};       // Mapa 1: EAN -> SKU (Doble filtro)
-    let maestroSkuMap = {};    // Mapa 2: SKU -> { Descripción, VidaÚtil }
+    let eanASkuMap = {};       // Mapa EAN -> { SKU, Descripcion } (Desde JSON General)
+    let maestroSkuMap = {};    // Mapa SKU -> { SKU, Descripcion, VidaUtil } (Desde Excel "Data...")
     let mesesVidaUtilActual = 0;
 
     function limpiarCodigo(codigo) {
@@ -182,97 +182,64 @@
     }
 
     function cargarDatosYArrancar() {
-        let peticiones = [];
-        let archivosEncontrados = 0;
-        
-        // Genera timestamp para romper la memoria caché de GitHub Pages y forzar la lectura del nuevo archivo
-        let versionUnica = new Date().getTime();
+        let timestamp = new Date().getTime(); // Anti-caché
 
-        // 1. Cargar Archivo Maestro Data.json (Si existe)
-        fetch(`Data.json?v=${versionUnica}`)
-        .then(res => res.json())
-        .then(dataMaestra => {
-            if (Array.isArray(dataMaestra)) {
-                dataMaestra.forEach(item => {
-                    let skuVal = "", descVal = "", vidaVal = "0";
+        // 1. Cargar JSON General (Contiene EAN, SKU y DESCRIPCIÓN de todos los productos)
+        let promesaGeneral = fetch(`Data_General.json?v=${timestamp}`)
+            .then(res => res.ok ? res.json() : fetch(`data_general.json?v=${timestamp}`).then(r => r.json()))
+            .then(dataGeneral => {
+                if (Array.isArray(dataGeneral)) {
+                    dataGeneral.forEach(item => {
+                        let skuVal = item["SKU"] || item["sku"] || item["Articulo"] || "";
+                        let eanVal = item["EAN"] || item["ean"] || item["Código de barras"] || item["CÃ³digo de barras"] || "";
+                        let descVal = item["DESCRIPCIÓN"] || item["DESCRIPCION"] || item["Descripción"] || item["Descrip Articulo"] || "";
 
-                    for (let llave in item) {
-                        let keyMin = llave.toLowerCase();
-                        let valStr = String(item[llave]).trim();
+                        let skuLimpio = limpiarCodigo(skuVal);
+                        let eanLimpio = limpiarCodigo(eanVal);
 
-                        if ((keyMin.includes("sku") || keyMin.includes("art") || keyMin.includes("mat")) && valStr.length >= 4 && valStr.length <= 8 && !isNaN(valStr)) {
-                            skuVal = valStr;
+                        if (eanLimpio && skuLimpio) {
+                            eanASkuMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal };
+                            let eanSinCeros = eanLimpio.replace(/^0+/, '');
+                            if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
+                                eanASkuMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal };
+                            }
                         }
-                        if (keyMin.includes("descrip") || (keyMin.includes("articulo") && valStr.match(/[a-zA-Z]/))) {
-                            descVal = valStr;
-                        }
-                        if (keyMin.includes("vida") || keyMin.includes("util") || keyMin.includes("fv")) {
-                            vidaVal = valStr;
-                        }
-                    }
+                    });
+                }
+            })
+            .catch(() => console.log("Nota: Buscando catálogo general..."));
 
-                    let skuLimpio = limpiarCodigo(skuVal);
-                    if (skuLimpio) {
-                        maestroSkuMap[skuLimpio] = {
-                            descripcion: descVal || "Sin descripción",
-                            sku: skuLimpio,
-                            vidaUtil: vidaVal
-                        };
-                        let skuSinCeros = skuLimpio.replace(/^0+/, '');
-                        if (skuSinCeros !== skuLimpio && skuSinCeros !== "") {
-                            maestroSkuMap[skuSinCeros] = maestroSkuMap[skuLimpio];
-                        }
-                    }
-                });
-            }
-        })
-        .catch(() => console.log("Cargando base de datos principal..."));
-
-        // 2. Cargar Archivos FV-1.json a FV-43.json sin guardar memoria caché
-        for (let i = 1; i <= 43; i++) {
-            peticiones.push(
-                fetch(`FV-${i}.json?v=${versionUnica}`)
-                .then(res => {
-                    if (!res.ok) throw new Error(`Falta`);
-                    archivosEncontrados++;
-                    return res.json();
-                })
-                .catch(() => null)
-            );
-        }
-
-        Promise.all(peticiones)
-        .then((todasLasListas) => {
-            todasLasListas.forEach(lista => {
-                if (lista && Array.isArray(lista)) {
-                    lista.forEach(item => {
-                        let skuVal = "", eanVal = "", descVal = "", vidaVal = "0";
+        // 2. Cargar Excel Maestro "Data..." (Contiene Columna A: SKU, Columna B: Descrip Articulo, Columna E: VIDA UTIL)
+        let promesaMaestro = fetch(`Data.json?v=${timestamp}`)
+            .then(res => res.ok ? res.json() : fetch(`data.json?v=${timestamp}`).then(r => r.json()))
+            .then(dataMaestra => {
+                if (Array.isArray(dataMaestra)) {
+                    dataMaestra.forEach(item => {
+                        let skuVal = "", descVal = "", vidaVal = "0";
 
                         for (let llave in item) {
                             let keyMin = llave.toLowerCase();
                             let valStr = String(item[llave]).trim();
 
+                            // Columna A (SKU)
                             if ((keyMin.includes("sku") || keyMin.includes("art") || keyMin.includes("mat")) && valStr.length >= 4 && valStr.length <= 8 && !isNaN(valStr)) {
                                 skuVal = valStr;
                             }
+                            // Columna B (Descripción)
                             if (keyMin.includes("descrip") || (keyMin.includes("articulo") && valStr.match(/[a-zA-Z]/))) {
                                 descVal = valStr;
                             }
+                            // Columna E (Vida Útil)
                             if (keyMin.includes("vida") || keyMin.includes("util") || keyMin.includes("fv")) {
                                 vidaVal = valStr;
-                            }
-                            if (keyMin.includes("barr") || keyMin.includes("ean") || keyMin.includes("cod")) {
-                                eanVal = valStr;
                             }
                         }
 
                         let skuLimpio = limpiarCodigo(skuVal);
-                        let eanLimpio = limpiarCodigo(eanVal);
-
-                        if (skuLimpio && !maestroSkuMap[skuLimpio]) {
+                        if (skuLimpio) {
                             maestroSkuMap[skuLimpio] = {
-                                descripcion: descVal || "Sin descripción",
                                 sku: skuLimpio,
+                                descripcion: descVal || "Sin descripción",
                                 vidaUtil: vidaVal
                             };
                             let skuSinCeros = skuLimpio.replace(/^0+/, '');
@@ -280,29 +247,27 @@
                                 maestroSkuMap[skuSinCeros] = maestroSkuMap[skuLimpio];
                             }
                         }
-
-                        if (eanLimpio && skuLimpio) {
-                            eanASkuMap[eanLimpio] = skuLimpio;
-                            let eanSinCeros = eanLimpio.replace(/^0+/, '');
-                            if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
-                                eanASkuMap[eanSinCeros] = skuLimpio;
-                            }
-                        }
                     });
                 }
-            });
+            })
+            .catch(() => console.log("Cargando maestro de vida útil..."));
 
-            let horaSincro = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            document.getElementById('txt-status').innerText = `✅ La última actualización de 'el excel de FV' (${archivosEncontrados} listas) sincronizada a las ${horaSincro} hrs.`;
-            document.getElementById('input-escaneo').focus();
-        })
-        .catch(err => {
-            console.error(err);
-            document.getElementById('txt-status').innerHTML = "<span class='error'>⚠️ Error al sincronizar 'el excel de FV'.</span>";
-        });
+        Promise.all([promesaGeneral, promesaMaestro])
+            .then(() => {
+                let ahora = new Date();
+                let horaStr = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
+                document.getElementById('input-escaneo').focus();
+            })
+            .catch(() => {
+                let ahora = new Date();
+                let horaStr = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
+                document.getElementById('input-escaneo').focus();
+            });
     }
 
-    // Disparo automático al usar el láser del Pocket Honeywell
+    // Disparo automático con láser Honeywell (Presiona Enter al escanear)
     document.getElementById('input-escaneo').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             procesarBusquedaManual();
@@ -316,40 +281,44 @@
         if (!lecturaIngresada) return;
 
         let codigoLimpio = limpiarCodigo(lecturaIngresada);
-        let skuEncontrado = "";
+        let skuFinal = "";
+        let descripcionFinal = "";
+        let vidaUtilFinal = "0";
 
-        // LÓGICA DE DOBLE FILTRO
-        if (maestroSkuMap[codigoLimpio]) {
-            skuEncontrado = codigoLimpio;
-        } else if (eanASkuMap[codigoLimpio]) {
-            skuEncontrado = eanASkuMap[codigoLimpio];
+        // CASO A: Se escanea un EAN
+        if (eanASkuMap[codigoLimpio]) {
+            skuFinal = eanASkuMap[codigoLimpio].sku;
+            descripcionFinal = eanASkuMap[codigoLimpio].descripcion;
         } else {
             let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
-            if (maestroSkuMap[codigoSinCeros]) {
-                skuEncontrado = codigoSinCeros;
-            } else if (eanASkuMap[codigoSinCeros]) {
-                skuEncontrado = eanASkuMap[codigoSinCeros];
+            if (eanASkuMap[codigoSinCeros]) {
+                skuFinal = eanASkuMap[codigoSinCeros].sku;
+                descripcionFinal = eanASkuMap[codigoSinCeros].descripcion;
             }
         }
 
-        if (!skuEncontrado) {
-            for (let claveSku in maestroSkuMap) {
-                if (claveSku === codigoLimpio || claveSku.endsWith(codigoLimpio) || codigoLimpio.endsWith(claveSku)) {
-                    if (claveSku.length >= 4) {
-                        skuEncontrado = claveSku;
-                        break;
-                    }
-                }
-            }
+        // CASO B: Se digita o busca directamente por SKU
+        if (!skuFinal) {
+            skuFinal = codigoLimpio;
         }
 
-        let producto = maestroSkuMap[skuEncontrado];
+        // CRUCE CON EXCEL MAESTRO "Data..."
+        let infoMaestra = maestroSkuMap[skuFinal] || maestroSkuMap[skuFinal.replace(/^0+/, '')];
 
-        if (producto) {
-            document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${producto.descripcion}`;
-            document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${producto.sku}`;
+        if (infoMaestra) {
+            // Si el maestro trae descripción la usa, si no, usa la del JSON General
+            if (infoMaestra.descripcion && infoMaestra.descripcion !== "Sin descripción") {
+                descripcionFinal = infoMaestra.descripcion;
+            }
+            vidaUtilFinal = infoMaestra.vidaUtil;
+        }
 
-            let numerosExtraidos = String(producto.vidaUtil).replace(/\D/g, '');
+        // PRESENTACIÓN DE RESULTADOS (SIEMPRE MUESTRA DESCRIPCIÓN)
+        if (infoMaestra || descripcionFinal) {
+            document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${descripcionFinal || "Sin descripción"}`;
+            document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${skuFinal}`;
+
+            let numerosExtraidos = String(vidaUtilFinal).replace(/\D/g, '');
             mesesVidaUtilActual = numerosExtraidos !== "" ? parseInt(numerosExtraidos) : 0;
             
             if (mesesVidaUtilActual > 0) {
