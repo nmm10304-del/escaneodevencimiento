@@ -33,27 +33,11 @@
             box-sizing: border-box;
         }
         
-        /* LOGO PROMART: Interactivo únicamente en PC */
         .logo {
             width: 150px;
             display: block;
             margin: 0 auto 15px;
             user-select: none;
-        }
-
-        @media (min-width: 769px) {
-            .logo-pc {
-                cursor: pointer;
-                transition: transform 0.2s;
-            }
-            .logo-pc:hover {
-                transform: scale(1.05);
-            }
-        }
-
-        /* Input de archivo totalmente oculto */
-        #excel-input-oculto {
-            display: none;
         }
 
         h2 { 
@@ -169,11 +153,7 @@
 <body>
 
 <div class="container">
-    <!-- LOGO PROMART: Carga oculta únicamente habilitada en PC -->
-    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo logo-pc" onclick="activarCargadorOcultoPC()">
-    
-    <!-- Input oculto para carga de Excel -->
-    <input type="file" id="excel-input-oculto" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo">
 
     <h2>FECHA DE VENCIMIENTO</h2>
     <p>Escanea o digita el SKU</p>
@@ -190,18 +170,17 @@
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil:</b> <span id="vida-val" class="no-registra">---</span></div>
     </div>
-    <div id="txt-status" class="info-status">Esperando datos...</div>
+    <div id="txt-status" class="info-status">Sincronizando con la nube...</div>
 
     <div class="seccion-juliana">
         <h2>Consulta Juliana + Vencimiento</h2>
         <p>Calcula la fecha real de fabricación y proyecta el vencimiento exacto</p>
-        
-        <!-- Inputs numéricos bloqueados inicialmente -->
-        <input type="number" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año (Ej: 2026)" disabled oninput="limitarYCalcular(this, 4)">
-        <input type="number" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos (Ej: 198)" disabled oninput="limitarYCalcular(this, 3)">
-        
+
+        <input type="number" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año (Ej: 2026)" disabled>
+        <input type="number" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos (Ej: 198)" disabled>
+
         <button id="btn-calcular-juliano" class="btn-buscar" disabled onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
-        
+
         <div class="panel-resultado-juliano">
             <div id="res-fabricacion" class="linea-res"><b>Fecha Real:</b> ---</div>
             <div id="res-vencimiento" class="linea-res"><b>Vence el:</b> <span style="color: #666;">Escanea un producto con vida útil primero</span></div>
@@ -218,7 +197,6 @@
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
         if (permitidos.includes(e.key)) return;
-
         if (!/^[0-9]$/.test(e.key)) {
             e.preventDefault();
         }
@@ -239,34 +217,17 @@
         return String(codigo).replace(/\D/g, '').trim();
     }
 
-    function actualizarHoraStatus(horaGuardada) {
-        let horaStr = horaGuardada || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    function actualizarHoraStatus(horaStr) {
         document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
     }
 
-    function activarCargadorOcultoPC() {
-        let esMovil = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
-        if (!esMovil) {
-            document.getElementById('excel-input-oculto').click();
-        }
-    }
-
-    function inicializarMemoriaYArchivos() {
-        let maestroGuardado = localStorage.getItem('promart_maestro_sku');
-        let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
-
-        if (maestroGuardado) {
-            try {
-                maestroSkuMap = JSON.parse(maestroGuardado);
-                actualizarHoraStatus(horaGuardada);
-            } catch (e) {
-                console.warn("Inicializando memoria...");
-            }
-        }
-
+    function inicializarSistemaCentral() {
         cargarArchivosBase();
+        cargarMaestroDesdeNube();
+        configurarEventosJulianosMóviles();
     }
 
+    // Carga de catálogo general EAN -> SKU
     function cargarArchivosBase() {
         let timestamp = new Date().getTime();
         let peticiones = [];
@@ -301,43 +262,32 @@
                     });
                 }
             });
-            if (!localStorage.getItem('promart_hora_actualizacion')) {
-                actualizarHoraStatus();
-            }
             document.getElementById('input-escaneo').focus();
         });
     }
 
-    function procesarArchivoExcel(event) {
-        let file = event.target.files[0];
-        if (!file) return;
-
-        let reader = new FileReader();
-
-        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-            reader.onload = function (e) {
-                let data = new Uint8Array(e.target.result);
-                let workbook = XLSX.read(data, { type: 'array' });
-                let primeraHoja = workbook.SheetNames[0];
-                let jsonExcel = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja]);
-
-                procesarDatosDeExcel(jsonExcel);
-            };
-            reader.readAsArrayBuffer(file);
-        } else if (file.name.endsWith('.json')) {
-            reader.onload = function (e) {
-                try {
-                    let jsonExcel = JSON.parse(e.target.result);
-                    procesarDatosDeExcel(jsonExcel);
-                } catch (err) {
-                    console.error("Error al leer el JSON.");
+    // CARGA CENTRALIZADA: Todos los dispositivos (PC y celulares) leen el mismo archivo en la nube
+    function cargarMaestroDesdeNube() {
+        let timestamp = new Date().getTime();
+        // Busca FV.json o Data.json directamente en tu repositorio
+        fetch(`FV.json?v=${timestamp}`)
+            .then(res => res.ok ? res.json() : fetch(`FV.xlsx?v=${timestamp}`).then(r => r.arrayBuffer()))
+            .then(data => {
+                if (data instanceof ArrayBuffer) {
+                    let workbook = XLSX.read(new Uint8Array(data), { type: 'array' });
+                    let primeraHoja = workbook.SheetNames[0];
+                    let jsonExcel = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja]);
+                    procesarDatosMaestros(jsonExcel);
+                } else {
+                    procesarDatosMaestros(data);
                 }
-            };
-            reader.readAsText(file);
-        }
+            })
+            .catch(() => {
+                document.getElementById('txt-status').innerText = "✅ Sistema listo para operar";
+            });
     }
 
-    function procesarDatosDeExcel(filas) {
+    function procesarDatosMaestros(filas) {
         if (!Array.isArray(filas)) return;
 
         maestroSkuMap = {};
@@ -375,31 +325,36 @@
         });
 
         let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        try {
-            localStorage.setItem('promart_maestro_sku', JSON.stringify(maestroSkuMap));
-            localStorage.setItem('promart_hora_actualizacion', horaActual);
-        } catch(e) {
-            console.warn("Memoria interna completa.");
-        }
-
-        document.getElementById('txt-status').innerText = `✅ Base de datos de FV actualizada correctamente (${horaActual})`;
-        document.getElementById('input-escaneo').focus();
+        actualizarHoraStatus(horaActual);
     }
 
-    document.getElementById('input-escaneo').addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
+    // Eventos para Pocket Honeywell y Móviles
+    document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.keyCode === 13) {
             procesarBusquedaManual();
         }
     });
 
-    document.getElementById('anio').addEventListener('keypress', function (e) { if (e.key === 'Enter') convertirFechaJulianaCompleta(); });
-    document.getElementById('juliano').addEventListener('keypress', function (e) { if (e.key === 'Enter') convertirFechaJulianaCompleta(); });
-    document.getElementById('anio').addEventListener('blur', convertirFechaJulianaCompleta);
-    document.getElementById('juliano').addEventListener('blur', convertirFechaJulianaCompleta);
+    function configurarEventosJulianosMóviles() {
+        let inputAnio = document.getElementById('anio');
+        let inputJuliano = document.getElementById('juliano');
 
-    function limitarYCalcular(elem, maxLen) {
-        elem.value = elem.value.slice(0, maxLen);
-        convertirFechaJulianaCompleta();
+        [inputAnio, inputJuliano].forEach(input => {
+            input.addEventListener('input', function() {
+                if (this.id === 'anio' && this.value.length > 4) this.value = this.value.slice(0, 4);
+                if (this.id === 'juliano' && this.value.length > 3) this.value = this.value.slice(0, 3);
+                convertirFechaJulianaCompleta();
+            });
+
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' || e.keyCode === 13) {
+                    convertirFechaJulianaCompleta();
+                    this.blur();
+                }
+            });
+
+            input.addEventListener('blur', convertirFechaJulianaCompleta);
+        });
     }
 
     function controlarEstadoCalculadora(habilitar) {
@@ -466,7 +421,6 @@
             let numerosExtraidos = String(vidaUtilFinal).replace(/\D/g, '');
             mesesVidaUtilActual = numerosExtraidos !== "" ? parseInt(numerosExtraidos) : 0;
             
-            // REGLA CLAVE: SI ES 0 O MENOR, MUESTRA "No registra vida útil"
             if (mesesVidaUtilActual > 0) {
                 let aniosCompletos = Math.floor(mesesVidaUtilActual / 12);
                 let mesesRestantes = mesesVidaUtilActual % 12;
@@ -523,7 +477,7 @@
         let contenedorVen = document.getElementById("res-vencimiento");
 
         if(anioInput === "" || julianoInput === ""){
-            contenedorFab.innerHTML = "<b>Fecha Real:</b> Ingrese los datos de fabricación";
+            contenedorFab.innerHTML = "<b>Fecha Real:</b> Ingrese datos";
             contenedorVen.innerHTML = "<b>Vence el:</b> ---";
             return;
         }
@@ -556,7 +510,7 @@
         contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]})</span>`;
     }
 
-    window.onload = inicializarMemoriaYArchivos;
+    window.onload = inicializarSistemaCentral;
 </script>
 </body>
 </html>
