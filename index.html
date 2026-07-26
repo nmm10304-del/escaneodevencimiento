@@ -140,8 +140,8 @@
 <div class="container">
     <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" class="logo">
     
-    <h2>CONSULTA POCKET / SKU</h2>
-    <p>Escanea con el láser del Pocket Honeywell o digita el SKU/EAN</p>
+    <h2>FECHA DE VENCIMIENTO</h2>
+    <p>Escanea o digita el SKU</p>
 
     <div class="seccion-lectura">
         <input type="text" id="input-escaneo" class="input-pocket" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off">
@@ -154,7 +154,7 @@
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil (meses):</b> <span id="vida-val" class="resaltado">---</span></div>
     </div>
-    <div id="txt-status" class="info-status">Cargando listas de almacén...</div>
+    <div id="txt-status" class="info-status">Sincronizando con GitHub...</div>
 
     <div class="seccion-juliana">
         <h2>Consulta Juliana + Vencimiento</h2>
@@ -173,7 +173,8 @@
 </div>
 
 <script>
-    let baseDatosUnificada = {};
+    let eanASkuMap = {};       // Mapa 1: EAN -> SKU (Doble filtro)
+    let maestroSkuMap = {};    // Mapa 2: SKU -> { Descripción, VidaÚtil }
     let mesesVidaUtilActual = 0;
 
     function limpiarCodigo(codigo) {
@@ -183,10 +184,54 @@
     function cargarDatosYArrancar() {
         let peticiones = [];
         let archivosEncontrados = 0;
+        
+        // Genera timestamp para romper la memoria caché de GitHub Pages y forzar la lectura del nuevo archivo
+        let versionUnica = new Date().getTime();
 
+        // 1. Cargar Archivo Maestro Data.json (Si existe)
+        fetch(`Data.json?v=${versionUnica}`)
+        .then(res => res.json())
+        .then(dataMaestra => {
+            if (Array.isArray(dataMaestra)) {
+                dataMaestra.forEach(item => {
+                    let skuVal = "", descVal = "", vidaVal = "0";
+
+                    for (let llave in item) {
+                        let keyMin = llave.toLowerCase();
+                        let valStr = String(item[llave]).trim();
+
+                        if ((keyMin.includes("sku") || keyMin.includes("art") || keyMin.includes("mat")) && valStr.length >= 4 && valStr.length <= 8 && !isNaN(valStr)) {
+                            skuVal = valStr;
+                        }
+                        if (keyMin.includes("descrip") || (keyMin.includes("articulo") && valStr.match(/[a-zA-Z]/))) {
+                            descVal = valStr;
+                        }
+                        if (keyMin.includes("vida") || keyMin.includes("util") || keyMin.includes("fv")) {
+                            vidaVal = valStr;
+                        }
+                    }
+
+                    let skuLimpio = limpiarCodigo(skuVal);
+                    if (skuLimpio) {
+                        maestroSkuMap[skuLimpio] = {
+                            descripcion: descVal || "Sin descripción",
+                            sku: skuLimpio,
+                            vidaUtil: vidaVal
+                        };
+                        let skuSinCeros = skuLimpio.replace(/^0+/, '');
+                        if (skuSinCeros !== skuLimpio && skuSinCeros !== "") {
+                            maestroSkuMap[skuSinCeros] = maestroSkuMap[skuLimpio];
+                        }
+                    }
+                });
+            }
+        })
+        .catch(() => console.log("Cargando base de datos principal..."));
+
+        // 2. Cargar Archivos FV-1.json a FV-43.json sin guardar memoria caché
         for (let i = 1; i <= 43; i++) {
             peticiones.push(
-                fetch(`FV-${i}.json`)
+                fetch(`FV-${i}.json?v=${versionUnica}`)
                 .then(res => {
                     if (!res.ok) throw new Error(`Falta`);
                     archivosEncontrados++;
@@ -198,54 +243,66 @@
 
         Promise.all(peticiones)
         .then((todasLasListas) => {
-            let totalProductos = 0;
-
             todasLasListas.forEach(lista => {
                 if (lista && Array.isArray(lista)) {
                     lista.forEach(item => {
-                        let eanOriginal = item["CÃ³digo de barras"] || item["Código de barras"] || item["EAN"] || item["Codigo de barras"] || item["CÓDIGO DE BARRAS"] || item["CÓDIGO"] || item["CODIGO"];
-                        let skuOriginal = item["Articulo"] || item["ArtÃculo"] || item["SKU"] || item["sku"] || item["MAT"] || item["Material"];
+                        let skuVal = "", eanVal = "", descVal = "", vidaVal = "0";
 
-                        // Indexar por Código de Barras / EAN
-                        if (eanOriginal) {
-                            let eanNumerico = limpiarCodigo(eanOriginal);
-                            if (eanNumerico) {
-                                baseDatosUnificada[eanNumerico] = item;
-                                totalProductos++;
-                                let eanSinCeros = eanNumerico.replace(/^0+/, '');
-                                if (eanSinCeros !== eanNumerico && eanSinCeros !== "") {
-                                    baseDatosUnificada[eanSinCeros] = item;
-                                }
+                        for (let llave in item) {
+                            let keyMin = llave.toLowerCase();
+                            let valStr = String(item[llave]).trim();
+
+                            if ((keyMin.includes("sku") || keyMin.includes("art") || keyMin.includes("mat")) && valStr.length >= 4 && valStr.length <= 8 && !isNaN(valStr)) {
+                                skuVal = valStr;
+                            }
+                            if (keyMin.includes("descrip") || (keyMin.includes("articulo") && valStr.match(/[a-zA-Z]/))) {
+                                descVal = valStr;
+                            }
+                            if (keyMin.includes("vida") || keyMin.includes("util") || keyMin.includes("fv")) {
+                                vidaVal = valStr;
+                            }
+                            if (keyMin.includes("barr") || keyMin.includes("ean") || keyMin.includes("cod")) {
+                                eanVal = valStr;
                             }
                         }
 
-                        // Indexar también directamente por SKU
-                        if (skuOriginal) {
-                            let skuNumerico = limpiarCodigo(skuOriginal);
-                            if (skuNumerico) {
-                                baseDatosUnificada[skuNumerico] = item;
-                                let skuSinCeros = skuNumerico.replace(/^0+/, '');
-                                if (skuSinCeros !== skuNumerico && skuSinCeros !== "") {
-                                    baseDatosUnificada[skuSinCeros] = item;
-                                }
+                        let skuLimpio = limpiarCodigo(skuVal);
+                        let eanLimpio = limpiarCodigo(eanVal);
+
+                        if (skuLimpio && !maestroSkuMap[skuLimpio]) {
+                            maestroSkuMap[skuLimpio] = {
+                                descripcion: descVal || "Sin descripción",
+                                sku: skuLimpio,
+                                vidaUtil: vidaVal
+                            };
+                            let skuSinCeros = skuLimpio.replace(/^0+/, '');
+                            if (skuSinCeros !== skuLimpio && skuSinCeros !== "") {
+                                maestroSkuMap[skuSinCeros] = maestroSkuMap[skuLimpio];
+                            }
+                        }
+
+                        if (eanLimpio && skuLimpio) {
+                            eanASkuMap[eanLimpio] = skuLimpio;
+                            let eanSinCeros = eanLimpio.replace(/^0+/, '');
+                            if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
+                                eanASkuMap[eanSinCeros] = skuLimpio;
                             }
                         }
                     });
                 }
             });
 
-            document.getElementById('txt-status').innerText = `✅ ¡${archivosEncontrados} listas cargadas! (${totalProductos} artículos listos).`;
-            
-            // Enfocar la caja de texto automáticamente
+            let horaSincro = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            document.getElementById('txt-status').innerText = `✅ La última actualización de 'el excel de FV' (${archivosEncontrados} listas) sincronizada a las ${horaSincro} hrs.`;
             document.getElementById('input-escaneo').focus();
         })
         .catch(err => {
             console.error(err);
-            document.getElementById('txt-status').innerHTML = "<span class='error'>⚠️ Error crítico al consolidar datos.</span>";
+            document.getElementById('txt-status').innerHTML = "<span class='error'>⚠️ Error al sincronizar 'el excel de FV'.</span>";
         });
     }
 
-    // Evento al presionar 'Enter' (Pistola Honeywell escanea y manda Enter)
+    // Disparo automático al usar el láser del Pocket Honeywell
     document.getElementById('input-escaneo').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             procesarBusquedaManual();
@@ -259,53 +316,40 @@
         if (!lecturaIngresada) return;
 
         let codigoLimpio = limpiarCodigo(lecturaIngresada);
-        let producto = baseDatosUnificada[codigoLimpio];
+        let skuEncontrado = "";
 
-        if (!producto) {
+        // LÓGICA DE DOBLE FILTRO
+        if (maestroSkuMap[codigoLimpio]) {
+            skuEncontrado = codigoLimpio;
+        } else if (eanASkuMap[codigoLimpio]) {
+            skuEncontrado = eanASkuMap[codigoLimpio];
+        } else {
             let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
-            producto = baseDatosUnificada[codigoSinCeros];
+            if (maestroSkuMap[codigoSinCeros]) {
+                skuEncontrado = codigoSinCeros;
+            } else if (eanASkuMap[codigoSinCeros]) {
+                skuEncontrado = eanASkuMap[codigoSinCeros];
+            }
         }
 
-        // Búsqueda inteligente de coincidencias
-        if (!producto) {
-            for (let clave in baseDatosUnificada) {
-                if (clave === codigoLimpio || clave.endsWith(codigoLimpio) || codigoLimpio.endsWith(clave)) {
-                    if (clave.length >= 5) {
-                        producto = baseDatosUnificada[clave];
+        if (!skuEncontrado) {
+            for (let claveSku in maestroSkuMap) {
+                if (claveSku === codigoLimpio || claveSku.endsWith(codigoLimpio) || codigoLimpio.endsWith(claveSku)) {
+                    if (claveSku.length >= 4) {
+                        skuEncontrado = claveSku;
                         break;
                     }
                 }
             }
         }
 
+        let producto = maestroSkuMap[skuEncontrado];
+
         if (producto) {
-            let descripcion = "Sin descripción";
-            let sku = "---";
-            let vidaUtilTexto = "0";
+            document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${producto.descripcion}`;
+            document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${producto.sku}`;
 
-            for (let llave in producto) {
-                let llaveMin = llave.toLowerCase();
-                let valor = String(producto[llave]).trim();
-
-                if (llaveMin.includes("descrip") || (llaveMin.includes("sku") && valor.match(/[a-zA-Z]/))) {
-                    descripcion = valor;
-                }
-                
-                if ((llaveMin.includes("art") || llaveMin.includes("sku") || llaveMin.includes("mat") || llaveMin.includes("cod")) && valor.length >= 4 && valor.length <= 8 && !isNaN(valor)) {
-                    sku = valor;
-                }
-                
-                if (llaveMin.includes("fv") || llaveMin.includes("vida") || llaveMin.includes("util")) {
-                    vidaUtilTexto = valor;
-                }
-            }
-
-            if (sku === "---") sku = codigoLimpio;
-
-            document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${descripcion}`;
-            document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${sku}`;
-
-            let numerosExtraidos = vidaUtilTexto.replace(/\D/g, '');
+            let numerosExtraidos = String(producto.vidaUtil).replace(/\D/g, '');
             mesesVidaUtilActual = numerosExtraidos !== "" ? parseInt(numerosExtraidos) : 0;
             
             if (mesesVidaUtilActual > 0) {
@@ -341,7 +385,6 @@
             mesesVidaUtilActual = 0;
         }
 
-        // Limpiar el campo y mantener el foco listo para el siguiente disparo del Honeywell
         inputElem.value = "";
         inputElem.focus();
     }
