@@ -33,25 +33,26 @@
             box-sizing: border-box;
         }
         
-        /* Logo interactivo (Cargador oculto en PC) */
+        /* LOGO PROMART: Interactivo solo en PC */
         .logo {
             width: 150px;
             display: block;
             margin: 0 auto 15px;
-            transition: transform 0.2s;
+            user-select: none;
         }
 
-        /* Solo en PC muestra el cursor de mano e interactividad */
+        /* En PC muestra el puntero interactivo */
         @media (min-width: 769px) {
-            .logo-pc-clickable {
+            .logo-pc {
                 cursor: pointer;
+                transition: transform 0.2s;
             }
-            .logo-pc-clickable:hover {
+            .logo-pc:hover {
                 transform: scale(1.05);
             }
         }
 
-        /* Ocultar el input file real */
+        /* Input de archivo totalmente invisible */
         #excel-input-oculto {
             display: none;
         }
@@ -159,17 +160,17 @@
 <body>
 
 <div class="container">
-    <!-- LOGO PROMART: En PC actúa como cargador oculto -->
-    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo logo-pc-clickable" onclick="activarCargadorOcultoPC()" title="Cargar nuevo Excel (Solo PC)">
+    <!-- LOGO PROMART: Carga oculta únicamente habilitada en PC -->
+    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo logo-pc" onclick="activarCargadorOcultoPC()">
     
-    <!-- Input oculto para cargar Excel -->
+    <!-- Input oculto para carga de Excel -->
     <input type="file" id="excel-input-oculto" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
 
     <h2>FECHA DE VENCIMIENTO</h2>
     <p>Escanea o digita el SKU</p>
 
     <div class="seccion-lectura">
-        <!-- Teclado numérico forzado en móviles mediante inputmode="numeric" -->
+        <!-- Teclado estrictamente numérico para celulares/Pockets -->
         <input type="text" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off">
         <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
     </div>
@@ -180,13 +181,13 @@
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil (meses):</b> <span id="vida-val" class="resaltado">---</span></div>
     </div>
-    <div id="txt-status" class="info-status">Esperando datos...</div>
+    <div id="txt-status" class="info-status">Cargando base de datos...</div>
 
     <div class="seccion-juliana">
         <h2>Consulta Juliana + Vencimiento</h2>
         <p>Calcula la fecha real de fabricación y proyecta el vencimiento exacto</p>
         
-        <!-- Inputs numéricos estrictos con auto-cálculo al presionar Enter/Cambiar campo -->
+        <!-- Auto-cálculo al escribir o dar Enter con teclado numérico -->
         <input type="number" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año (Ej: 2026)" oninput="limitarYCalcular(this, 4)">
         <input type="number" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos (Ej: 198)" oninput="limitarYCalcular(this, 3)">
         
@@ -213,13 +214,16 @@
         document.getElementById('txt-status').innerText = `✅ Última actualización a las ${horaStr}`;
     }
 
-    // Carga oculta activada al hacer clic en el Logo (Solo en PC)
+    // OMITIR EN CELULAR: Solo se ejecuta si la pantalla es de PC (ancho mayor a 768px y sin pantalla táctil primaria)
     function activarCargadorOcultoPC() {
-        if (window.innerWidth > 768) {
+        let esMovil = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
+        
+        if (!esMovil) {
             document.getElementById('excel-input-oculto').click();
         }
     }
 
+    // Inicializa cargando primero los datos permanentes de la memoria interna (localStorage)
     function inicializarMemoriaYArchivos() {
         let maestroGuardado = localStorage.getItem('promart_maestro_sku');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
@@ -229,7 +233,7 @@
                 maestroSkuMap = JSON.parse(maestroGuardado);
                 actualizarHoraStatus(horaGuardada);
             } catch (e) {
-                console.warn("Reinicializando memoria...");
+                console.warn("Error leyendo memoria guardada.");
             }
         }
 
@@ -343,27 +347,27 @@
             }
         });
 
+        // PERSISTENCIA PERMANENTE: Se guarda en el navegador sin importar si recargas o actualizas
         let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         try {
             localStorage.setItem('promart_maestro_sku', JSON.stringify(maestroSkuMap));
             localStorage.setItem('promart_hora_actualizacion', horaActual);
         } catch(e) {
-            console.warn("Memoria completa, operando en vivo.");
+            console.warn("Memoria completa.");
         }
 
         actualizarHoraStatus(horaActual);
-        alert("✅ Nuevo Excel de FV cargado y guardado correctamente.");
+        alert("✅ Base de datos de FV actualizada correctamente.");
         document.getElementById('input-escaneo').focus();
     }
 
-    // Búsqueda al presionar Enter en el Pocket/Celular
+    // Eventos de teclado y auto-cálculos
     document.getElementById('input-escaneo').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             procesarBusquedaManual();
         }
     });
 
-    // Auto-cálculo inmediato en fecha Juliana al escribir o presionar Enter
     document.getElementById('anio').addEventListener('keypress', function (e) { if (e.key === 'Enter') convertirFechaJulianaCompleta(); });
     document.getElementById('juliano').addEventListener('keypress', function (e) { if (e.key === 'Enter') convertirFechaJulianaCompleta(); });
     document.getElementById('anio').addEventListener('blur', convertirFechaJulianaCompleta);
