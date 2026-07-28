@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -36,6 +37,11 @@
             display: block;
             margin: 0 auto 15px;
             user-select: none;
+            cursor: pointer;
+        }
+
+        #excel-input-oculto {
+            display: none;
         }
 
         h2 { 
@@ -88,10 +94,22 @@
             transition: background 0.2s;
         }
         .btn-buscar:hover { background: #e65c00; }
-        .btn-buscar:disabled {
-            background: #cccccc !important;
-            cursor: not-allowed;
+        
+        /* Botón de No Escanea */
+        .btn-alerta-no-escanea {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px;
+            font-size: 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 8px;
+            width: 100%;
+            transition: background 0.2s;
         }
+        .btn-alerta-no-escanea:hover { background: #5a6268; }
 
         .resultado-box {
             margin-top: 15px;
@@ -107,6 +125,19 @@
         .no-registra { font-weight: bold; color: #dc3545; font-size: 16px; }
         .error { color: #dc3545; font-weight: bold; }
         .info-status { font-size: 13px; color: #28a745; text-align: center; margin-top: 10px; font-weight: bold; }
+
+        /* Estilos del Panel Administrador */
+        .panel-admi {
+            display: none;
+            background: #fff3cd;
+            border: 2px solid #ffeeba;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            text-align: left;
+        }
+        .panel-admi h3 { color: #856404; margin: 0 0 10px 0; font-size: 16px; }
+        .lista-alertas { background: white; padding: 10px; border-radius: 6px; border: 1px solid #ffeeba; max-height: 100px; overflow-y: auto; font-size: 13px; font-family: monospace; }
 
         .seccion-juliana {
             margin-top: 25px;
@@ -151,7 +182,10 @@
 <body>
 
 <div class="container">
-    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo">
+    <!-- Clic en el logo abre el Login de Administrador -->
+    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo" onclick="loginAdministrador()">
+    
+    <input type="file" id="excel-input-oculto" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
 
     <h2>FECHA DE VENCIMIENTO</h2>
     <p>Escanea o digita el SKU</p>
@@ -159,6 +193,17 @@
     <div class="seccion-lectura">
         <input type="tel" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off" onkeydown="bloquearLetras(event)" onpaste="limpiarTextoPegado(event)" oninput="limpiarValorDirecto(this)">
         <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
+        <!-- Nuevo Botón Solicitado -->
+        <button class="btn-alerta-no-escanea" onclick="reportarSkuNoEscanea()">⚠️ SKU/EAN NO ESCANEA</button>
+    </div>
+
+    <!-- Panel ADMI oculto por defecto -->
+    <div id="panel-admi" class="panel-admi">
+        <h3>🛠️ Panel Administrador</h3>
+        <button class="btn-buscar" style="margin-top:0; margin-bottom:10px; background:#007bff;" onclick="document.getElementById('excel-input-oculto').click()">MIGRAR NUEVO EXCEL/JSON</button>
+        <div style="margin-bottom: 5px; font-size: 13px;"><b>Códigos Reportados por el Personal:</b></div>
+        <div id="lista-alertas" class="lista-alertas">No hay alertas pendientes.</div>
+        <button class="btn-alerta-no-escanea" style="background:#dc3545;" onclick="limpiarAlertasAdmi()">Limpiar Historial de Alertas</button>
     </div>
 
     <div class="resultado-box">
@@ -189,6 +234,7 @@
     let eanASkuMap = {};       
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
+    const CLAVE_ADMI = "1234"; // <--- AQUÍ PUEDES CAMBIAR TU CLAVE ADMI
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -214,24 +260,75 @@
     }
 
     function inicializarSistemaEstatico() {
-        // 1. CARGA AL TOQUE DESDE MEMORIA LOCAL (Cero demoras al recargar la página)
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
-        let versionGuardada = localStorage.getItem('promart_version_json');
-        
+        let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
+
         if (cacheGuardada) {
             try {
                 maestroSkuMap = JSON.parse(cacheGuardada);
-                if (versionGuardada) {
-                    document.getElementById('txt-status').innerText = `✅ Base FV activa (${versionGuardada})`;
+                if (horaGuardada) {
+                    document.getElementById('txt-status').innerText = `✅ Base FV activa (${horaGuardada})`;
                 }
             } catch(e) {}
         }
 
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
+        actualizarVistaAlertasAdmi();
+    }
 
-        // 2. COMPROBACIÓN ÚNICA EN SEGUNDO PLANO: Solo actualiza si cambiaron el archivo en GitHub
-        verificarCambiosEnGitHub();
+    // ACCESO ADMI CONTROLADO
+    function loginAdministrador() {
+        let panel = document.getElementById('panel-admi');
+        if (panel.style.display === 'block') {
+            panel.style.display = 'none'; // Si ya está abierto, lo cierra
+            return;
+        }
+
+        let pass = prompt("Introduzca la clave de usuario ADMI:");
+        if (pass === CLAVE_ADMI) {
+            panel.style.display = 'block';
+            actualizarVistaAlertasAdmi();
+        } else if (pass !== null) {
+            alert("❌ Clave incorrecta. Acceso denegado.");
+        }
+    }
+
+    // REGISTRO DE ALERTAS DE OPERARIOS
+    function reportarSkuNoEscanea() {
+        let inputElem = document.getElementById('input-escaneo');
+        let codigoReportado = inputElem.value.trim();
+
+        if (!codigoReportado) {
+            alert("Por favor escribe o introduce un código antes de reportar.");
+            return;
+        }
+
+        let alertas = JSON.parse(localStorage.getItem('promart_alertas_no_escanea') || '[]');
+        let horaReporte = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        alertas.unshift(`[${horaReporte}] Código: ${codigoReportado}`);
+        localStorage.setItem('promart_alertas_no_escanea', JSON.stringify(alertas));
+
+        alert("⚠️ Alerta enviada al administrador con éxito.");
+        inputElem.value = "";
+        inputElem.focus();
+        actualizarVistaAlertasAdmi();
+    }
+
+    function actualizarVistaAlertasAdmi() {
+        let alertas = JSON.parse(localStorage.getItem('promart_alertas_no_escanea') || '[]');
+        let contenedor = document.getElementById('lista-alertas');
+        if (alertas.length > 0) {
+            contenedor.innerHTML = alertas.map(a => `<div>${a}</div>`).join('');
+        } else {
+            contenedor.innerHTML = "No hay alertas pendientes.";
+        }
+    }
+
+    function limpiarAlertasAdmi() {
+        localStorage.removeItem('promart_alertas_no_escanea');
+        actualizarVistaAlertasAdmi();
     }
 
     function cargarArchivosBase() {
@@ -270,37 +367,35 @@
         });
     }
 
-    // VERIFICA SI HAY UN NUEVO JSON EN GITHUB COMPARANDO FECHAS/VERSIONES
-    function verificarCambiosEnGitHub() {
-        let ts = new Date().getTime();
-        // Agregamos una marca de tiempo interna para consultar si GitHub tiene un archivo más reciente
-        fetch(`FV.json?check=${ts}`, { method: 'HEAD' })
-            .then(res => {
-                if (res.ok) {
-                    let ultimaModificacion = res.headers.get('last-modified') || String(ts);
-                    let versionLocal = localStorage.getItem('promart_version_json');
+    function procesarArchivoExcel(event) {
+        let file = event.target.files[0];
+        if (!file) return;
 
-                    // SOLO SI EL ARCHIVO EN GITHUB ES NUEVO, SE DESCARGA Y ACTUALIZA
-                    if (versionLocal !== ultimaModificacion) {
-                        fetch(`FV.json?v=${ts}`)
-                            .then(r => r.ok ? r.json() : null)
-                            .then(data => {
-                                if (data && Array.isArray(data)) {
-                                    procesarDatosMaestros(data);
-                                    localStorage.setItem('promart_maestro_json', JSON.stringify(maestroSkuMap));
-                                    localStorage.setItem('promart_version_json', ultimaModificacion);
-                                    
-                                    let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                                    document.getElementById('txt-status').innerText = `✅ Base FV actualizada desde GitHub (${horaActual})`;
-                                }
-                            });
-                    }
+        let reader = new FileReader();
+
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+            reader.onload = function (e) {
+                let data = new Uint8Array(e.target.result);
+                let workbook = XLSX.read(data, { type: 'array' });
+                let primeraHoja = workbook.SheetNames[0];
+                let jsonExcel = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja]);
+                procesarDatosDeExcel(jsonExcel);
+            };
+            reader.readAsArrayBuffer(file);
+        } else if (file.name.endsWith('.json')) {
+            reader.onload = function (e) {
+                try {
+                    let jsonExcel = JSON.parse(e.target.result);
+                    procesarDatosDeExcel(jsonExcel);
+                } catch (err) {
+                    alert("Error al leer el archivo JSON.");
                 }
-            })
-            .catch(() => {});
+            };
+            reader.readAsText(file);
+        }
     }
 
-    function procesarDatosMaestros(filas) {
+    function procesarDatosDeExcel(filas) {
         if (!Array.isArray(filas)) return;
         maestroSkuMap = {};
 
@@ -335,6 +430,15 @@
                 }
             }
         });
+
+        let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        try {
+            localStorage.setItem('promart_maestro_json', JSON.stringify(maestroSkuMap));
+            localStorage.setItem('promart_hora_actualizacion', horaActual);
+        } catch(e) {}
+
+        document.getElementById('txt-status').innerText = `✅ Base FV actualizada correctamente (${horaActual})`;
+        document.getElementById('input-escaneo').focus();
     }
 
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
