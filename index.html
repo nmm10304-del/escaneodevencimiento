@@ -300,10 +300,10 @@
     let eanASkuMap = {};       
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
-    let reportesAlertasMap = {}; // Objeto asociativo para Firebase
+    let reportesAlertas = [];
 
-    // ENDPOINT FIREBASE PÚBLICO EN VIVO
-    const FIREBASE_BASE_URL = "https://promart-vencimientos-default-rtdb.firebaseio.com/alertas";
+    // SERVIDOR PÚBLICO LIBRE DE ALTA DISPONIBILIDAD SIN RESTRICCIONES DE CORS
+    const API_NUBE_GLOBAL = "https://api.npoint.io/423f77df23023e13d9f1";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -354,9 +354,9 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Consulta en vivo a la nube cada 2 segundos
-        descargarAlertasNubeEnVivo();
-        setInterval(descargarAlertasNubeEnVivo, 2000);
+        // Escucha constante en vivo a la nube cada 2 segundos
+        descargarAlertasNubeGlobal();
+        setInterval(descargarAlertasNubeGlobal, 2000);
     }
 
     function cargarArchivosBase() {
@@ -395,7 +395,7 @@
         });
     }
 
-    /* ENVÍO REAL INDIVIDUAL A LA NUBE (Sincroniza cel ↔ pc sin sobrescribir) */
+    /* REPORTE MIGRADO EN TIEMPO REAL A TODOS LOS EQUIPOS (CELULAR / POCKET / PC) */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -404,29 +404,39 @@
         }
 
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        let nuevoReporte = { codigo: valInput, hora: hora };
-
-        // Enviar como nuevo registro independiente mediante POST
-        fetch(`${FIREBASE_BASE_URL}.json`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(nuevoReporte)
-        }).then(() => {
-            descargarAlertasNubeEnVivo();
-        }).catch(() => {});
+        
+        // Primero descargamos los más recientes de la nube para no pisar
+        fetch(API_NUBE_GLOBAL)
+            .then(res => res.ok ? res.json() : [])
+            .then(data => {
+                let listaActual = Array.isArray(data) ? data : [];
+                listaActual.push({ codigo: valInput, hora: hora });
+                reportesAlertas = listaActual;
+                
+                // Enviar la lista actualizada a la nube
+                return fetch(API_NUBE_GLOBAL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(listaActual)
+                });
+            })
+            .then(() => {
+                descargarAlertasNubeGlobal();
+            })
+            .catch(() => {});
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
-    function descargarAlertasNubeEnVivo() {
-        fetch(`${FIREBASE_BASE_URL}.json?t=${new Date().getTime()}`)
-            .then(res => res.ok ? res.json() : null)
+    function descargarAlertasNubeGlobal() {
+        fetch(API_NUBE_GLOBAL)
+            .then(res => res.ok ? res.json() : [])
             .then(data => {
-                if (data && typeof data === 'object') {
-                    reportesAlertasMap = data;
+                if (Array.isArray(data)) {
+                    reportesAlertas = data;
                 } else {
-                    reportesAlertasMap = {};
+                    reportesAlertas = [];
                 }
 
                 if (document.getElementById('modal-admin').style.display === 'flex') {
@@ -455,7 +465,7 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
-            descargarAlertasNubeEnVivo();
+            descargarAlertasNubeGlobal();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -470,19 +480,16 @@
 
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
-        let llaves = Object.keys(reportesAlertasMap);
-
-        if (llaves.length === 0) {
+        if (!reportesAlertas || reportesAlertas.length === 0) {
             cont.innerHTML = "No hay alertas pendientes.";
         } else {
             let htmlHTML = "";
-            llaves.forEach(idKey => {
-                let item = reportesAlertasMap[idKey];
+            reportesAlertas.forEach((item, index) => {
                 if (item && item.codigo) {
                     htmlHTML += `
                         <div class="item-alerta">
                             <span>• <b>${item.codigo}</b> (${item.hora || 'S/H'})</span>
-                            <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual('${idKey}')">✕</span>
+                            <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual(${index})">✕</span>
                         </div>
                     `;
                 }
@@ -491,19 +498,26 @@
         }
     }
 
-    function eliminarAlertaIndividual(idKey) {
-        delete reportesAlertasMap[idKey];
-        fetch(`${FIREBASE_BASE_URL}/${idKey}.json`, { method: 'DELETE' })
-            .then(() => descargarAlertasNubeEnVivo())
-            .catch(() => {});
+    function eliminarAlertaIndividual(index) {
+        reportesAlertas.splice(index, 1);
+        
+        fetch(API_NUBE_GLOBAL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reportesAlertas)
+        }).then(() => descargarAlertasNubeGlobal());
+
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
-        reportesAlertasMap = {};
-        fetch(`${FIREBASE_BASE_URL}.json`, { method: 'DELETE' })
-            .then(() => descargarAlertasNubeEnVivo())
-            .catch(() => {});
+        reportesAlertas = [];
+        fetch(API_NUBE_GLOBAL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify([])
+        }).then(() => descargarAlertasNubeGlobal());
+
         actualizarListaAlertasAdmin();
     }
 
