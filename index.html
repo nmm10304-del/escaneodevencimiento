@@ -32,17 +32,25 @@
             box-sizing: border-box;
         }
         
+        /* LOGO PROMART: Interactivo únicamente en PC */
         .logo {
             width: 150px;
             display: block;
             margin: 0 auto 15px;
             user-select: none;
-            cursor: pointer;
         }
 
-        #excel-input-oculto {
-            display: none;
+        @media (min-width: 769px) {
+            .logo-pc {
+                cursor: pointer;
+                transition: transform 0.2s;
+            }
+            .logo-pc:hover {
+                transform: scale(1.05);
+            }
         }
+
+        #excel-input-oculto { display: none; }
 
         h2 { 
             color: #ff6a00; 
@@ -95,9 +103,8 @@
         }
         .btn-buscar:hover { background: #e65c00; }
         
-        /* Botón de No Escanea */
-        .btn-alerta-no-escanea {
-            background: #6c757d;
+        .btn-alerta {
+            background: #dc3545;
             color: white;
             border: none;
             padding: 10px;
@@ -107,9 +114,8 @@
             font-weight: bold;
             margin-top: 8px;
             width: 100%;
-            transition: background 0.2s;
         }
-        .btn-alerta-no-escanea:hover { background: #5a6268; }
+        .btn-alerta:hover { background: #c82333; }
 
         .resultado-box {
             margin-top: 15px;
@@ -125,19 +131,6 @@
         .no-registra { font-weight: bold; color: #dc3545; font-size: 16px; }
         .error { color: #dc3545; font-weight: bold; }
         .info-status { font-size: 13px; color: #28a745; text-align: center; margin-top: 10px; font-weight: bold; }
-
-        /* Estilos del Panel Administrador */
-        .panel-admi {
-            display: none;
-            background: #fff3cd;
-            border: 2px solid #ffeeba;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 15px;
-            text-align: left;
-        }
-        .panel-admi h3 { color: #856404; margin: 0 0 10px 0; font-size: 16px; }
-        .lista-alertas { background: white; padding: 10px; border-radius: 6px; border: 1px solid #ffeeba; max-height: 100px; overflow-y: auto; font-size: 13px; font-family: monospace; }
 
         .seccion-juliana {
             margin-top: 25px;
@@ -171,6 +164,43 @@
         .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
         .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
 
+        /* MODALES */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-contenido {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 400px;
+            width: 90%;
+            text-align: left;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .cerrar-modal {
+            float: right;
+            font-size: 20px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .lista-reportes {
+            max-height: 150px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border: 1px solid #ccc;
+            padding: 8px;
+            font-size: 13px;
+            margin-top: 8px;
+            border-radius: 4px;
+        }
+
         input::-webkit-outer-spin-button,
         input::-webkit-inner-spin-button {
             -webkit-appearance: none;
@@ -182,28 +212,18 @@
 <body>
 
 <div class="container">
-    <!-- Clic en el logo abre el Login de Administrador -->
-    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo" onclick="loginAdministrador()">
-    
+    <!-- LOGO PROMART: Carga/Login de Admin activado ÚNICAMENTE si es PC -->
+    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo logo-pc" onclick="solicitarClaveModalSoloPC()">
     <input type="file" id="excel-input-oculto" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
 
     <h2>FECHA DE VENCIMIENTO</h2>
     <p>Escanea o digita el SKU</p>
 
     <div class="seccion-lectura">
+        <!-- TECLADO FORZADO SOLO NÚMEROS -->
         <input type="tel" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off" onkeydown="bloquearLetras(event)" onpaste="limpiarTextoPegado(event)" oninput="limpiarValorDirecto(this)">
         <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
-        <!-- Nuevo Botón Solicitado -->
-        <button class="btn-alerta-no-escanea" onclick="reportarSkuNoEscanea()">⚠️ SKU/EAN NO ESCANEA</button>
-    </div>
-
-    <!-- Panel ADMI oculto por defecto -->
-    <div id="panel-admi" class="panel-admi">
-        <h3>🛠️ Panel Administrador</h3>
-        <button class="btn-buscar" style="margin-top:0; margin-bottom:10px; background:#007bff;" onclick="document.getElementById('excel-input-oculto').click()">MIGRAR NUEVO EXCEL/JSON</button>
-        <div style="margin-bottom: 5px; font-size: 13px;"><b>Códigos Reportados por el Personal:</b></div>
-        <div id="lista-alertas" class="lista-alertas">No hay alertas pendientes.</div>
-        <button class="btn-alerta-no-escanea" style="background:#dc3545;" onclick="limpiarAlertasAdmi()">Limpiar Historial de Alertas</button>
+        <button class="btn-alerta" onclick="reportarFallaEscaneo()">⚠️ SKU/EAN NO ESCANEA</button>
     </div>
 
     <div class="resultado-box">
@@ -218,8 +238,8 @@
         <h2>Consulta Juliana + Vencimiento</h2>
         <p>Calcula la fecha real de fabricación y proyecta el vencimiento exacto</p>
 
-        <input type="number" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año (Ej: 2026)" disabled>
-        <input type="number" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos (Ej: 198)" disabled>
+        <input type="tel" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año (Ej: 2026)" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+        <input type="tel" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos (Ej: 198)" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
 
         <button id="btn-calcular-juliano" class="btn-buscar" disabled onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
 
@@ -230,12 +250,46 @@
     </div>
 </div>
 
+<!-- MODAL SOLICITUD DE CLAVE ADMI (SÓLO PC) -->
+<div id="modal-clave" class="modal">
+    <div class="modal-contenido">
+        <span class="cerrar-modal" onclick="cerrarModalClave()">&times;</span>
+        <h3 style="color: #ff6a00; margin-top:0;">Atención</h3>
+        <p style="margin-bottom: 10px;">Introduzca la clave de usuario ADMI:</p>
+        <input type="password" id="input-clave-admin" placeholder="Contraseña de ADMI" style="margin-top:0;">
+        <button class="btn-buscar" onclick="validarClaveAdmin()">Aceptar</button>
+    </div>
+</div>
+
+<!-- MODAL PANEL ADMINISTRADOR -->
+<div id="modal-admin" class="modal">
+    <div class="modal-contenido">
+        <span class="cerrar-modal" onclick="cerrarModoAdmin()">&times;</span>
+        <h3 style="color: #ff6a00; margin-top:0;">Panel de Administrador</h3>
+        
+        <label><b>Cargar Nuevo Excel/JSON de FV:</b></label>
+        <button class="btn-buscar" style="margin-bottom:15px;" onclick="document.getElementById('excel-input-oculto').click()">Subir Archivo Excel/JSON</button>
+        
+        <hr>
+        <label><b>Modificar Vida Útil Manualmente:</b></label>
+        <input type="tel" id="admin-sku" inputmode="numeric" pattern="[0-9]*" placeholder="SKU Producto" style="margin-top:5px;" onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+        <input type="tel" id="admin-meses" inputmode="numeric" pattern="[0-9]*" placeholder="Nuevos Meses de Vida Útil" style="margin-top:5px;" onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+        <button class="btn-buscar" onclick="modificarVidaUtilAdmin()">Guardar Cambio</button>
+
+        <hr>
+        <label><b>Códigos Reportados por el Personal:</b></label>
+        <div id="lista-alertas" class="lista-reportes">No hay alertas pendientes.</div>
+        <button class="btn-alerta" style="margin-top:8px;" onclick="limpiarAlertasAdmin()">Limpiar Historial de Alertas</button>
+    </div>
+</div>
+
 <script>
     let eanASkuMap = {};       
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
-    const CLAVE_ADMI = "1234"; // <--- AQUÍ PUEDES CAMBIAR TU CLAVE ADMI
+    let reportesAlertas = [];
 
+    // BLOQUEO ESTRICTO A SOLO NÚMEROS EN TECLADO FÍSICO Y PANTALLA
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
         if (permitidos.includes(e.key)) return;
@@ -262,6 +316,7 @@
     function inicializarSistemaEstatico() {
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
+        let alertasGuardadas = localStorage.getItem('promart_alertas');
 
         if (cacheGuardada) {
             try {
@@ -271,64 +326,12 @@
                 }
             } catch(e) {}
         }
+        if (alertasGuardadas) {
+            try { reportesAlertas = JSON.parse(alertasGuardadas); } catch(e) {}
+        }
 
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
-        actualizarVistaAlertasAdmi();
-    }
-
-    // ACCESO ADMI CONTROLADO
-    function loginAdministrador() {
-        let panel = document.getElementById('panel-admi');
-        if (panel.style.display === 'block') {
-            panel.style.display = 'none'; // Si ya está abierto, lo cierra
-            return;
-        }
-
-        let pass = prompt("Introduzca la clave de usuario ADMI:");
-        if (pass === CLAVE_ADMI) {
-            panel.style.display = 'block';
-            actualizarVistaAlertasAdmi();
-        } else if (pass !== null) {
-            alert("❌ Clave incorrecta. Acceso denegado.");
-        }
-    }
-
-    // REGISTRO DE ALERTAS DE OPERARIOS
-    function reportarSkuNoEscanea() {
-        let inputElem = document.getElementById('input-escaneo');
-        let codigoReportado = inputElem.value.trim();
-
-        if (!codigoReportado) {
-            alert("Por favor escribe o introduce un código antes de reportar.");
-            return;
-        }
-
-        let alertas = JSON.parse(localStorage.getItem('promart_alertas_no_escanea') || '[]');
-        let horaReporte = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-        alertas.unshift(`[${horaReporte}] Código: ${codigoReportado}`);
-        localStorage.setItem('promart_alertas_no_escanea', JSON.stringify(alertas));
-
-        alert("⚠️ Alerta enviada al administrador con éxito.");
-        inputElem.value = "";
-        inputElem.focus();
-        actualizarVistaAlertasAdmi();
-    }
-
-    function actualizarVistaAlertasAdmi() {
-        let alertas = JSON.parse(localStorage.getItem('promart_alertas_no_escanea') || '[]');
-        let contenedor = document.getElementById('lista-alertas');
-        if (alertas.length > 0) {
-            contenedor.innerHTML = alertas.map(a => `<div>${a}</div>`).join('');
-        } else {
-            contenedor.innerHTML = "No hay alertas pendientes.";
-        }
-    }
-
-    function limpiarAlertasAdmi() {
-        localStorage.removeItem('promart_alertas_no_escanea');
-        actualizarVistaAlertasAdmi();
     }
 
     function cargarArchivosBase() {
@@ -365,6 +368,86 @@
             });
             document.getElementById('input-escaneo').focus();
         });
+    }
+
+    function reportarFallaEscaneo() {
+        let valInput = document.getElementById('input-escaneo').value.trim();
+        if (!valInput) {
+            alert("Escribe o escanea el código antes de presionar el botón de alerta.");
+            return;
+        }
+        let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        reportesAlertas.push({ codigo: valInput, hora: hora });
+        localStorage.setItem('promart_alertas', JSON.stringify(reportesAlertas));
+        
+        document.getElementById('txt-status').innerText = `⚠️ Alerta enviada al Administrador (${valInput})`;
+        document.getElementById('input-escaneo').value = "";
+    }
+
+    /* FILTRO MÓVIL/PC: El login SOLO se abre en computadoras de escritorio */
+    function solicitarClaveModalSoloPC() {
+        let esMovil = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
+        if (!esMovil) {
+            document.getElementById('input-clave-admin').value = "";
+            document.getElementById('modal-clave').style.display = 'flex';
+            document.getElementById('input-clave-admin').focus();
+        }
+    }
+
+    function cerrarModalClave() {
+        document.getElementById('modal-clave').style.display = 'none';
+    }
+
+    function validarClaveAdmin() {
+        let clave = document.getElementById('input-clave-admin').value;
+        if (clave === "admin123") {
+            cerrarModalClave();
+            actualizarListaAlertasAdmin();
+            document.getElementById('modal-admin').style.display = 'flex';
+        } else {
+            alert("Contraseña incorrecta.");
+        }
+    }
+
+    function cerrarModoAdmin() {
+        document.getElementById('modal-admin').style.display = 'none';
+    }
+
+    function actualizarListaAlertasAdmin() {
+        let cont = document.getElementById('lista-alertas');
+        if (reportesAlertas.length === 0) {
+            cont.innerHTML = "No hay alertas pendientes.";
+        } else {
+            cont.innerHTML = reportesAlertas.map(a => `• <b>${a.codigo}</b> (${a.hora})`).join("<br>");
+        }
+    }
+
+    function limpiarAlertasAdmin() {
+        reportesAlertas = [];
+        localStorage.removeItem('promart_alertas');
+        actualizarListaAlertasAdmin();
+    }
+
+    function modificarVidaUtilAdmin() {
+        let sku = document.getElementById('admin-sku').value.trim();
+        let meses = document.getElementById('admin-meses').value.trim();
+
+        if (!sku || !meses) {
+            alert("Ingresa SKU y los meses.");
+            return;
+        }
+
+        let skuLimpio = limpiarCodigo(sku);
+        if (!maestroSkuMap[skuLimpio]) {
+            maestroSkuMap[skuLimpio] = { sku: skuLimpio, descripcion: "Modificado por Admin", vidaUtil: meses };
+        } else {
+            maestroSkuMap[skuLimpio].vidaUtil = meses;
+        }
+
+        localStorage.setItem('promart_maestro_json', JSON.stringify(maestroSkuMap));
+        alert(`✅ SKU ${skuLimpio} actualizado a ${meses} meses.`);
+        document.getElementById('admin-sku').value = "";
+        document.getElementById('admin-meses').value = "";
     }
 
     function procesarArchivoExcel(event) {
@@ -444,6 +527,12 @@
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             procesarBusquedaManual();
+        }
+    });
+
+    document.getElementById('input-clave-admin').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.keyCode === 13) {
+            validarClaveAdmin();
         }
     });
 
@@ -619,7 +708,7 @@
         let anioV = fechaVencimiento.getFullYear();
 
         let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-        contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()-1 < 0 ? 0 : fechaVencimiento.getMonth()]} )</span>`;
+        contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]} )</span>`;
     }
 
     window.onload = inicializarSistemaEstatico;
