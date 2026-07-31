@@ -263,7 +263,7 @@
     </div>
 </div>
 
-<!-- MODAL DE MENSAJES AVISO Y ERROR -->
+<!-- MODAL DE NOTIFICACIONES -->
 <div id="modal-info" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalInfo()">&times;</span>
@@ -291,7 +291,7 @@
         <h3 style="color: #ff6a00; margin-top:0;">Panel de Administrador</h3>
         
         <label><b>Códigos Reportados por el Personal:</b></label>
-        <div id="lista-alertas" class="lista-reportes">No hay alertas pendientes.</div>
+        <div id="lista-alertas" class="lista-reportes">Cargando reportes en vivo...</div>
         <button class="btn-alerta" style="margin-top:15px;" onclick="limpiarAlertasAdmin()">Limpiar Historial de Alertas</button>
     </div>
 </div>
@@ -300,10 +300,10 @@
     let eanASkuMap = {};       
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
-    let reportesAlertas = [];
+    let reportesAlertasMap = {}; // Objeto asociativo para Firebase
 
-    // ENDPOINT FIREBASE REALTIME PÚBLICO LIBRE PARA MIGRACIÓN INSTANTÁNEA GLOBAL
-    const API_FIREBASE_ALERTAS = "https://promart-almacen-default-rtdb.firebaseio.com/alertas.json";
+    // ENDPOINT FIREBASE PÚBLICO EN VIVO
+    const FIREBASE_BASE_URL = "https://promart-vencimientos-default-rtdb.firebaseio.com/alertas";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -354,9 +354,9 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Consulta sincrónica global en vivo cada 2 segundos
-        descargarAlertasNubeReal();
-        setInterval(descargarAlertasNubeReal, 2000);
+        // Consulta en vivo a la nube cada 2 segundos
+        descargarAlertasNubeEnVivo();
+        setInterval(descargarAlertasNubeEnVivo, 2000);
     }
 
     function cargarArchivosBase() {
@@ -395,7 +395,7 @@
         });
     }
 
-    /* ENVÍO REAL Y MIGRACIÓN EN TIEMPO REAL ENTRE DISPOSITIVOS */
+    /* ENVÍO REAL INDIVIDUAL A LA NUBE (Sincroniza cel ↔ pc sin sobrescribir) */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -404,38 +404,29 @@
         }
 
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-        // Agregar a la lista actual
-        reportesAlertas.push({ codigo: valInput, hora: hora });
-        
-        // Sincronizar en la nube global
-        subirAlertasNubeReal();
+        let nuevoReporte = { codigo: valInput, hora: hora };
 
-        // MOSTRAR ÚNICAMENTE LA VENTANA EMERGENTE SOLICITADA
+        // Enviar como nuevo registro independiente mediante POST
+        fetch(`${FIREBASE_BASE_URL}.json`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(nuevoReporte)
+        }).then(() => {
+            descargarAlertasNubeEnVivo();
+        }).catch(() => {});
+
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
-    function subirAlertasNubeReal() {
-        fetch(API_FIREBASE_ALERTAS, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(reportesAlertas)
-        }).catch(() => {});
-    }
-
-    function descargarAlertasNubeReal() {
-        fetch(API_FIREBASE_ALERTAS)
+    function descargarAlertasNubeEnVivo() {
+        fetch(`${FIREBASE_BASE_URL}.json?t=${new Date().getTime()}`)
             .then(res => res.ok ? res.json() : null)
             .then(data => {
-                if (data) {
-                    if (Array.isArray(data)) {
-                        reportesAlertas = data;
-                    } else if (typeof data === 'object') {
-                        reportesAlertas = Object.values(data);
-                    }
+                if (data && typeof data === 'object') {
+                    reportesAlertasMap = data;
                 } else {
-                    reportesAlertas = [];
+                    reportesAlertasMap = {};
                 }
 
                 if (document.getElementById('modal-admin').style.display === 'flex') {
@@ -464,7 +455,7 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
-            descargarAlertasNubeReal();
+            descargarAlertasNubeEnVivo();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -479,16 +470,19 @@
 
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
-        if (!reportesAlertas || reportesAlertas.length === 0) {
+        let llaves = Object.keys(reportesAlertasMap);
+
+        if (llaves.length === 0) {
             cont.innerHTML = "No hay alertas pendientes.";
         } else {
             let htmlHTML = "";
-            reportesAlertas.forEach((item, index) => {
-                if(item && item.codigo) {
+            llaves.forEach(idKey => {
+                let item = reportesAlertasMap[idKey];
+                if (item && item.codigo) {
                     htmlHTML += `
                         <div class="item-alerta">
                             <span>• <b>${item.codigo}</b> (${item.hora || 'S/H'})</span>
-                            <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual(${index})">✕</span>
+                            <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual('${idKey}')">✕</span>
                         </div>
                     `;
                 }
@@ -497,15 +491,19 @@
         }
     }
 
-    function eliminarAlertaIndividual(index) {
-        reportesAlertas.splice(index, 1);
-        subirAlertasNubeReal();
+    function eliminarAlertaIndividual(idKey) {
+        delete reportesAlertasMap[idKey];
+        fetch(`${FIREBASE_BASE_URL}/${idKey}.json`, { method: 'DELETE' })
+            .then(() => descargarAlertasNubeEnVivo())
+            .catch(() => {});
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
-        reportesAlertas = [];
-        subirAlertasNubeReal();
+        reportesAlertasMap = {};
+        fetch(`${FIREBASE_BASE_URL}.json`, { method: 'DELETE' })
+            .then(() => descargarAlertasNubeEnVivo())
+            .catch(() => {});
         actualizarListaAlertasAdmin();
     }
 
