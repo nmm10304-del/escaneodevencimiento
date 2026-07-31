@@ -163,7 +163,7 @@
         .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
         .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
 
-        /* ESTILOS MODALES */
+        /* MODALES */
         .modal {
             display: none;
             position: fixed;
@@ -263,7 +263,7 @@
     </div>
 </div>
 
-<!-- MODAL GENÉRICO DE AVISOS Y MENSAJES -->
+<!-- MODAL DE MENSAJES AVISO Y ERROR -->
 <div id="modal-info" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalInfo()">&times;</span>
@@ -284,7 +284,7 @@
     </div>
 </div>
 
-<!-- MODAL PANEL ADMINISTRADOR SIMPLIFICADO -->
+<!-- MODAL PANEL ADMINISTRADOR -->
 <div id="modal-admin" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModoAdmin()">&times;</span>
@@ -302,9 +302,8 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // URL DE API NUBE PÚBLICA LIBRE PARA SINCRONIZAR REPORTES EN TIEMPO REAL
-    const API_NUBE_URL = "https://api.jsonbin.io/v3/b/669000001122334455667788"; // Canal de pruebas rápido o KV
-    const CANAL_KV = "https://kvdb.io/W3M9p2L1Xz8Y1A4B7C/promart_alertas_fv";
+    // ENDPOINT FIREBASE REALTIME PÚBLICO LIBRE PARA MIGRACIÓN INSTANTÁNEA GLOBAL
+    const API_FIREBASE_ALERTAS = "https://promart-almacen-default-rtdb.firebaseio.com/alertas.json";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -355,9 +354,9 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Consulta en vivo a la nube cada 3 segundos
-        descargarAlertasNube();
-        setInterval(descargarAlertasNube, 3000);
+        // Consulta sincrónica global en vivo cada 2 segundos
+        descargarAlertasNubeReal();
+        setInterval(descargarAlertasNubeReal, 2000);
     }
 
     function cargarArchivosBase() {
@@ -396,7 +395,7 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL A LA NUBE Y MENSAJE EMERGENE EXACTO */
+    /* ENVÍO REAL Y MIGRACIÓN EN TIEMPO REAL ENTRE DISPOSITIVOS */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -405,40 +404,45 @@
         }
 
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        // Agregar a la lista actual
         reportesAlertas.push({ codigo: valInput, hora: hora });
         
-        // Envia a la nube global inmediatamente
-        subirAlertasNube();
+        // Sincronizar en la nube global
+        subirAlertasNubeReal();
 
-        // 1. AVISO EN VENTANA EMERGENTE EXACTO
+        // MOSTRAR ÚNICAMENTE LA VENTANA EMERGENTE SOLICITADA
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
-        
         document.getElementById('input-escaneo').value = "";
     }
 
-    function subirAlertasNube() {
-        fetch(CANAL_KV, {
-            method: 'POST',
+    function subirAlertasNubeReal() {
+        fetch(API_FIREBASE_ALERTAS, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(reportesAlertas)
         }).catch(() => {});
-        localStorage.setItem('promart_alertas_temp', JSON.stringify(reportesAlertas));
     }
 
-    function descargarAlertasNube() {
-        fetch(CANAL_KV + '?v=' + new Date().getTime())
+    function descargarAlertasNubeReal() {
+        fetch(API_FIREBASE_ALERTAS)
             .then(res => res.ok ? res.json() : null)
             .then(data => {
-                if (data && Array.isArray(data)) {
-                    reportesAlertas = data;
-                    if (document.getElementById('modal-admin').style.display === 'flex') {
-                        actualizarListaAlertasAdmin();
+                if (data) {
+                    if (Array.isArray(data)) {
+                        reportesAlertas = data;
+                    } else if (typeof data === 'object') {
+                        reportesAlertas = Object.values(data);
                     }
+                } else {
+                    reportesAlertas = [];
+                }
+
+                if (document.getElementById('modal-admin').style.display === 'flex') {
+                    actualizarListaAlertasAdmin();
                 }
             })
-            .catch(() => {
-                let temp = localStorage.getItem('promart_alertas_temp');
-                if (temp) { try { reportesAlertas = JSON.parse(temp); } catch(e){} }
-            });
+            .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -460,6 +464,7 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
+            descargarAlertasNubeReal();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -474,31 +479,33 @@
 
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
-        if (reportesAlertas.length === 0) {
+        if (!reportesAlertas || reportesAlertas.length === 0) {
             cont.innerHTML = "No hay alertas pendientes.";
         } else {
             let htmlHTML = "";
             reportesAlertas.forEach((item, index) => {
-                htmlHTML += `
-                    <div class="item-alerta">
-                        <span>• <b>${item.codigo}</b> (${item.hora})</span>
-                        <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual(${index})">✕</span>
-                    </div>
-                `;
+                if(item && item.codigo) {
+                    htmlHTML += `
+                        <div class="item-alerta">
+                            <span>• <b>${item.codigo}</b> (${item.hora || 'S/H'})</span>
+                            <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual(${index})">✕</span>
+                        </div>
+                    `;
+                }
             });
-            cont.innerHTML = htmlHTML;
+            cont.innerHTML = htmlHTML || "No hay alertas pendientes.";
         }
     }
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        subirAlertasNube();
+        subirAlertasNubeReal();
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        subirAlertasNube();
+        subirAlertasNubeReal();
         actualizarListaAlertasAdmin();
     }
 
