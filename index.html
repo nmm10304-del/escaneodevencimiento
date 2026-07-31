@@ -32,7 +32,6 @@
             box-sizing: border-box;
         }
         
-        /* LOGO PROMART: Interactivo únicamente en PC */
         .logo {
             width: 150px;
             display: block;
@@ -164,7 +163,7 @@
         .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
         .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
 
-        /* MODALES */
+        /* MODALES DISEÑADOS EN HTML (SIN VENTANAS FEAS DEL NAVEGADOR) */
         .modal {
             display: none;
             position: fixed;
@@ -212,15 +211,15 @@
 <body>
 
 <div class="container">
-    <!-- LOGO PROMART: Carga/Login de Admin activado ÚNICAMENTE si es PC -->
-    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo logo-pc" onclick="solicitarClaveModalSoloPC()">
+    <!-- LOGO PROMART: Clic bloqueado completamente en Celular/Móvil -->
+    <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo logo-pc" onclick="solicitarClaveSoloDesdePC()">
     <input type="file" id="excel-input-oculto" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
 
     <h2>FECHA DE VENCIMIENTO</h2>
     <p>Escanea o digita el SKU</p>
 
     <div class="seccion-lectura">
-        <!-- TECLADO FORZADO SOLO NÚMEROS -->
+        <!-- TECLADO EXCLUSIVO DE NÚMEROS -->
         <input type="tel" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off" onkeydown="bloquearLetras(event)" onpaste="limpiarTextoPegado(event)" oninput="limpiarValorDirecto(this)">
         <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
         <button class="btn-alerta" onclick="reportarFallaEscaneo()">⚠️ SKU/EAN NO ESCANEA</button>
@@ -250,7 +249,7 @@
     </div>
 </div>
 
-<!-- MODAL SOLICITUD DE CLAVE ADMI (SÓLO PC) -->
+<!-- MODAL ELEGANTE DE ACCESO ADMI (SOLO PC) -->
 <div id="modal-clave" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalClave()">&times;</span>
@@ -384,10 +383,12 @@
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* FILTRO MÓVIL/PC: El login SOLO se abre en computadoras de escritorio */
-    function solicitarClaveModalSoloPC() {
-        let esMovil = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
-        if (!esMovil) {
+    /* DETECCION 100% EFECTIVA: Bloquea el login si es un celular/pantalla táctil */
+    function solicitarClaveSoloDesdePC() {
+        let esPantallaTactil = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        let esAnchoMovil = window.innerWidth <= 768;
+
+        if (!esPantallaTactil && !esAnchoMovil) {
             document.getElementById('input-clave-admin').value = "";
             document.getElementById('modal-clave').style.display = 'flex';
             document.getElementById('input-clave-admin').focus();
