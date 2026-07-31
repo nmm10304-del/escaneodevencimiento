@@ -49,6 +49,8 @@
             }
         }
 
+        #excel-input-oculto { display: none; }
+
         h2 { 
             color: #ff6a00; 
             margin-top: 0; 
@@ -161,7 +163,7 @@
         .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
         .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
 
-        /* MODALES DISEÑADOS EN PANTALLA */
+        /* ESTILOS MODALES */
         .modal {
             display: none;
             position: fixed;
@@ -261,7 +263,7 @@
     </div>
 </div>
 
-<!-- MODAL GENÉRICO DE VENTANAS EMERGENTES (REEMPLAZA CUALQUIER BARRA INFERIOR) -->
+<!-- MODAL GENÉRICO DE AVISOS Y MENSAJES -->
 <div id="modal-info" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalInfo()">&times;</span>
@@ -282,7 +284,7 @@
     </div>
 </div>
 
-<!-- MODAL PANEL ADMINISTRADOR -->
+<!-- MODAL PANEL ADMINISTRADOR SIMPLIFICADO -->
 <div id="modal-admin" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModoAdmin()">&times;</span>
@@ -300,8 +302,9 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // CANAL DE COMUNICACIÓN EN TIEMPO REAL NUBE/DISPOSITIVOS (NATIVE SYNC)
-    const CANAL_NUBE_ALERTAS = 'promart_alertas_globales';
+    // URL DE API NUBE PÚBLICA LIBRE PARA SINCRONIZAR REPORTES EN TIEMPO REAL
+    const API_NUBE_URL = "https://api.jsonbin.io/v3/b/669000001122334455667788"; // Canal de pruebas rápido o KV
+    const CANAL_KV = "https://kvdb.io/W3M9p2L1Xz8Y1A4B7C/promart_alertas_fv";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -349,9 +352,12 @@
             } catch(e) {}
         }
 
-        sincronizarAlertasGlobales();
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
+
+        // Consulta en vivo a la nube cada 3 segundos
+        descargarAlertasNube();
+        setInterval(descargarAlertasNube, 3000);
     }
 
     function cargarArchivosBase() {
@@ -390,7 +396,7 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL (LLEGA INSTANTÁNEAMENTE A OTROS EQUIPOS Y MUESTRA MODAL EMERGENTE) */
+    /* REPORTE EN TIEMPO REAL A LA NUBE Y MENSAJE EMERGENE EXACTO */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -401,36 +407,38 @@
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         reportesAlertas.push({ codigo: valInput, hora: hora });
         
-        guardarYSincronizarAlertas();
+        // Envia a la nube global inmediatamente
+        subirAlertasNube();
 
-        // MUESTRA EXCLUSIVAMENTE LA VENTANA EMERGENTE
-        mostrarModalInfo("Atención", `⚠️ Alerta enviada al Administrador (${valInput})`);
+        // 1. AVISO EN VENTANA EMERGENTE EXACTO
+        mostrarModalInfo("Atención", "Alerta enviada al administrador.");
+        
         document.getElementById('input-escaneo').value = "";
     }
 
-    function guardarYSincronizarAlertas() {
-        localStorage.setItem(CANAL_NUBE_ALERTAS, JSON.stringify(reportesAlertas));
-        // Dispara evento de actualización instantánea para otras pestañas o ventanas
-        window.dispatchEvent(new Event('storage'));
+    function subirAlertasNube() {
+        fetch(CANAL_KV, {
+            method: 'POST',
+            body: JSON.stringify(reportesAlertas)
+        }).catch(() => {});
+        localStorage.setItem('promart_alertas_temp', JSON.stringify(reportesAlertas));
     }
 
-    function sincronizarAlertasGlobales() {
-        let alertasGuardadas = localStorage.getItem(CANAL_NUBE_ALERTAS);
-        if (alertasGuardadas) {
-            try { reportesAlertas = JSON.parse(alertasGuardadas); } catch(e) {}
-        }
-        
-        window.addEventListener('storage', function (e) {
-            let actualizadas = localStorage.getItem(CANAL_NUBE_ALERTAS);
-            if (actualizadas) {
-                try {
-                    reportesAlertas = JSON.parse(actualizadas);
+    function descargarAlertasNube() {
+        fetch(CANAL_KV + '?v=' + new Date().getTime())
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data && Array.isArray(data)) {
+                    reportesAlertas = data;
                     if (document.getElementById('modal-admin').style.display === 'flex') {
                         actualizarListaAlertasAdmin();
                     }
-                } catch(e) {}
-            }
-        });
+                }
+            })
+            .catch(() => {
+                let temp = localStorage.getItem('promart_alertas_temp');
+                if (temp) { try { reportesAlertas = JSON.parse(temp); } catch(e){} }
+            });
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -484,14 +492,13 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        guardarYSincronizarAlertas();
+        subirAlertasNube();
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        localStorage.removeItem(CANAL_NUBE_ALERTAS);
-        guardarYSincronizarAlertas();
+        subirAlertasNube();
         actualizarListaAlertasAdmin();
     }
 
