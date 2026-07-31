@@ -161,7 +161,7 @@
         .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
         .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
 
-        /* ESTILOS MODALES */
+        /* MODALES DISEÑADOS EN PANTALLA */
         .modal {
             display: none;
             position: fixed;
@@ -261,7 +261,7 @@
     </div>
 </div>
 
-<!-- MODAL GENÉRICO DE NOTIFICACIONES -->
+<!-- MODAL GENÉRICO DE VENTANAS EMERGENTES (REEMPLAZA CUALQUIER BARRA INFERIOR) -->
 <div id="modal-info" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalInfo()">&times;</span>
@@ -282,7 +282,7 @@
     </div>
 </div>
 
-<!-- MODAL PANEL ADMINISTRADOR SIMPLIFICADO -->
+<!-- MODAL PANEL ADMINISTRADOR -->
 <div id="modal-admin" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModoAdmin()">&times;</span>
@@ -299,6 +299,9 @@
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
+
+    // CANAL DE COMUNICACIÓN EN TIEMPO REAL NUBE/DISPOSITIVOS (NATIVE SYNC)
+    const CANAL_NUBE_ALERTAS = 'promart_alertas_globales';
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -336,7 +339,6 @@
     function inicializarSistemaEstatico() {
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
-        let alertasGuardadas = localStorage.getItem('promart_alertas');
 
         if (cacheGuardada) {
             try {
@@ -346,10 +348,8 @@
                 }
             } catch(e) {}
         }
-        if (alertasGuardadas) {
-            try { reportesAlertas = JSON.parse(alertasGuardadas); } catch(e) {}
-        }
 
+        sincronizarAlertasGlobales();
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
     }
@@ -390,21 +390,47 @@
         });
     }
 
-    /* REPORTE DE FALLA CON VENTANA EMERGENTE EXACTA */
+    /* REPORTE EN TIEMPO REAL (LLEGA INSTANTÁNEAMENTE A OTROS EQUIPOS Y MUESTRA MODAL EMERGENTE) */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
             mostrarModalInfo("Hola", "Escribe o escanea el código antes de presionar el botón de alerta.");
             return;
         }
+
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         reportesAlertas.push({ codigo: valInput, hora: hora });
-        localStorage.setItem('promart_alertas', JSON.stringify(reportesAlertas));
         
-        // Ventana emergente tipo 2da imagen
+        guardarYSincronizarAlertas();
+
+        // MUESTRA EXCLUSIVAMENTE LA VENTANA EMERGENTE
         mostrarModalInfo("Atención", `⚠️ Alerta enviada al Administrador (${valInput})`);
-        document.getElementById('txt-status').innerText = `⚠️ Alerta enviada al Administrador (${valInput})`;
         document.getElementById('input-escaneo').value = "";
+    }
+
+    function guardarYSincronizarAlertas() {
+        localStorage.setItem(CANAL_NUBE_ALERTAS, JSON.stringify(reportesAlertas));
+        // Dispara evento de actualización instantánea para otras pestañas o ventanas
+        window.dispatchEvent(new Event('storage'));
+    }
+
+    function sincronizarAlertasGlobales() {
+        let alertasGuardadas = localStorage.getItem(CANAL_NUBE_ALERTAS);
+        if (alertasGuardadas) {
+            try { reportesAlertas = JSON.parse(alertasGuardadas); } catch(e) {}
+        }
+        
+        window.addEventListener('storage', function (e) {
+            let actualizadas = localStorage.getItem(CANAL_NUBE_ALERTAS);
+            if (actualizadas) {
+                try {
+                    reportesAlertas = JSON.parse(actualizadas);
+                    if (document.getElementById('modal-admin').style.display === 'flex') {
+                        actualizarListaAlertasAdmin();
+                    }
+                } catch(e) {}
+            }
+        });
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -438,7 +464,6 @@
         document.getElementById('modal-admin').style.display = 'none';
     }
 
-    /* RENDERIZA LA LISTA DE REPORTES CON BOTÓN DE EQUIS (✕) POR CADA SKU */
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
         if (reportesAlertas.length === 0) {
@@ -459,13 +484,14 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        localStorage.setItem('promart_alertas', JSON.stringify(reportesAlertas));
+        guardarYSincronizarAlertas();
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        localStorage.removeItem('promart_alertas');
+        localStorage.removeItem(CANAL_NUBE_ALERTAS);
+        guardarYSincronizarAlertas();
         actualizarListaAlertasAdmin();
     }
 
