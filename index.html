@@ -49,8 +49,6 @@
             }
         }
 
-        #excel-input-oculto { display: none; }
-
         h2 { 
             color: #ff6a00; 
             margin-top: 0; 
@@ -163,7 +161,7 @@
         .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
         .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
 
-        /* MODALES DISEÑADOS EN HTML (SIN VENTANAS FEAS DEL NAVEGADOR) */
+        /* ESTILOS MODALES */
         .modal {
             display: none;
             position: fixed;
@@ -190,15 +188,32 @@
             font-weight: bold;
         }
         .lista-reportes {
-            max-height: 150px;
+            max-height: 200px;
             overflow-y: auto;
             background: #f8f9fa;
             border: 1px solid #ccc;
             padding: 8px;
-            font-size: 13px;
+            font-size: 14px;
             margin-top: 8px;
             border-radius: 4px;
         }
+        .item-alerta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .item-alerta:last-child { border-bottom: none; }
+        .btn-eliminar-item {
+            color: #dc3545;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 8px;
+            user-select: none;
+        }
+        .btn-eliminar-item:hover { color: #a71d2a; }
 
         input::-webkit-outer-spin-button,
         input::-webkit-inner-spin-button {
@@ -211,15 +226,12 @@
 <body>
 
 <div class="container">
-    <!-- LOGO PROMART: Clic bloqueado completamente en Celular/Móvil -->
     <img src="https://upload.wikimedia.org/wikipedia/commons/1/11/Promart_logo_2019.svg" alt="Promart" id="img-logo" class="logo logo-pc" onclick="solicitarClaveSoloDesdePC()">
-    <input type="file" id="excel-input-oculto" accept=".xlsx, .xls, .json" onchange="procesarArchivoExcel(event)">
 
     <h2>FECHA DE VENCIMIENTO</h2>
     <p>Escanea o digita el SKU</p>
 
     <div class="seccion-lectura">
-        <!-- TECLADO EXCLUSIVO DE NÚMEROS -->
         <input type="tel" id="input-escaneo" class="input-pocket" inputmode="numeric" pattern="[0-9]*" placeholder="Escanea o escribe aquí..." autofocus autocomplete="off" onkeydown="bloquearLetras(event)" onpaste="limpiarTextoPegado(event)" oninput="limpiarValorDirecto(this)">
         <button class="btn-buscar" onclick="procesarBusquedaManual()">BUSCAR PRODUCTO</button>
         <button class="btn-alerta" onclick="reportarFallaEscaneo()">⚠️ SKU/EAN NO ESCANEA</button>
@@ -249,7 +261,17 @@
     </div>
 </div>
 
-<!-- MODAL ELEGANTE DE ACCESO ADMI (SOLO PC) -->
+<!-- MODAL GENÉRICO DE NOTIFICACIONES -->
+<div id="modal-info" class="modal">
+    <div class="modal-contenido">
+        <span class="cerrar-modal" onclick="cerrarModalInfo()">&times;</span>
+        <h3 id="modal-info-titulo" style="color: #ff6a00; margin-top:0;">Mensaje</h3>
+        <p id="modal-info-texto" style="margin-bottom: 15px; font-size: 15px; color: #333;"></p>
+        <button class="btn-buscar" onclick="cerrarModalInfo()">Aceptar</button>
+    </div>
+</div>
+
+<!-- MODAL SOLICITUD DE CLAVE ADMI (SÓLO PC) -->
 <div id="modal-clave" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalClave()">&times;</span>
@@ -260,25 +282,15 @@
     </div>
 </div>
 
-<!-- MODAL PANEL ADMINISTRADOR -->
+<!-- MODAL PANEL ADMINISTRADOR SIMPLIFICADO -->
 <div id="modal-admin" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModoAdmin()">&times;</span>
         <h3 style="color: #ff6a00; margin-top:0;">Panel de Administrador</h3>
         
-        <label><b>Cargar Nuevo Excel/JSON de FV:</b></label>
-        <button class="btn-buscar" style="margin-bottom:15px;" onclick="document.getElementById('excel-input-oculto').click()">Subir Archivo Excel/JSON</button>
-        
-        <hr>
-        <label><b>Modificar Vida Útil Manualmente:</b></label>
-        <input type="tel" id="admin-sku" inputmode="numeric" pattern="[0-9]*" placeholder="SKU Producto" style="margin-top:5px;" onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
-        <input type="tel" id="admin-meses" inputmode="numeric" pattern="[0-9]*" placeholder="Nuevos Meses de Vida Útil" style="margin-top:5px;" onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
-        <button class="btn-buscar" onclick="modificarVidaUtilAdmin()">Guardar Cambio</button>
-
-        <hr>
         <label><b>Códigos Reportados por el Personal:</b></label>
         <div id="lista-alertas" class="lista-reportes">No hay alertas pendientes.</div>
-        <button class="btn-alerta" style="margin-top:8px;" onclick="limpiarAlertasAdmin()">Limpiar Historial de Alertas</button>
+        <button class="btn-alerta" style="margin-top:15px;" onclick="limpiarAlertasAdmin()">Limpiar Historial de Alertas</button>
     </div>
 </div>
 
@@ -288,7 +300,6 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // BLOQUEO ESTRICTO A SOLO NÚMEROS EN TECLADO FÍSICO Y PANTALLA
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
         if (permitidos.includes(e.key)) return;
@@ -310,6 +321,16 @@
 
     function limpiarCodigo(codigo) {
         return String(codigo).replace(/\D/g, '').trim();
+    }
+
+    function mostrarModalInfo(titulo, texto) {
+        document.getElementById('modal-info-titulo').innerText = titulo;
+        document.getElementById('modal-info-texto').innerText = texto;
+        document.getElementById('modal-info').style.display = 'flex';
+    }
+
+    function cerrarModalInfo() {
+        document.getElementById('modal-info').style.display = 'none';
     }
 
     function inicializarSistemaEstatico() {
@@ -369,21 +390,23 @@
         });
     }
 
+    /* REPORTE DE FALLA CON VENTANA EMERGENTE EXACTA */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
-            alert("Escribe o escanea el código antes de presionar el botón de alerta.");
+            mostrarModalInfo("Hola", "Escribe o escanea el código antes de presionar el botón de alerta.");
             return;
         }
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         reportesAlertas.push({ codigo: valInput, hora: hora });
         localStorage.setItem('promart_alertas', JSON.stringify(reportesAlertas));
         
+        // Ventana emergente tipo 2da imagen
+        mostrarModalInfo("Atención", `⚠️ Alerta enviada al Administrador (${valInput})`);
         document.getElementById('txt-status').innerText = `⚠️ Alerta enviada al Administrador (${valInput})`;
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* DETECCION 100% EFECTIVA: Bloquea el login si es un celular/pantalla táctil */
     function solicitarClaveSoloDesdePC() {
         let esPantallaTactil = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         let esAnchoMovil = window.innerWidth <= 768;
@@ -406,7 +429,8 @@
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
-            alert("Contraseña incorrecta.");
+            cerrarModalClave();
+            mostrarModalInfo("Error", "Contraseña incorrecta.");
         }
     }
 
@@ -414,115 +438,35 @@
         document.getElementById('modal-admin').style.display = 'none';
     }
 
+    /* RENDERIZA LA LISTA DE REPORTES CON BOTÓN DE EQUIS (✕) POR CADA SKU */
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
         if (reportesAlertas.length === 0) {
             cont.innerHTML = "No hay alertas pendientes.";
         } else {
-            cont.innerHTML = reportesAlertas.map(a => `• <b>${a.codigo}</b> (${a.hora})`).join("<br>");
+            let htmlHTML = "";
+            reportesAlertas.forEach((item, index) => {
+                htmlHTML += `
+                    <div class="item-alerta">
+                        <span>• <b>${item.codigo}</b> (${item.hora})</span>
+                        <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual(${index})">✕</span>
+                    </div>
+                `;
+            });
+            cont.innerHTML = htmlHTML;
         }
+    }
+
+    function eliminarAlertaIndividual(index) {
+        reportesAlertas.splice(index, 1);
+        localStorage.setItem('promart_alertas', JSON.stringify(reportesAlertas));
+        actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
         localStorage.removeItem('promart_alertas');
         actualizarListaAlertasAdmin();
-    }
-
-    function modificarVidaUtilAdmin() {
-        let sku = document.getElementById('admin-sku').value.trim();
-        let meses = document.getElementById('admin-meses').value.trim();
-
-        if (!sku || !meses) {
-            alert("Ingresa SKU y los meses.");
-            return;
-        }
-
-        let skuLimpio = limpiarCodigo(sku);
-        if (!maestroSkuMap[skuLimpio]) {
-            maestroSkuMap[skuLimpio] = { sku: skuLimpio, descripcion: "Modificado por Admin", vidaUtil: meses };
-        } else {
-            maestroSkuMap[skuLimpio].vidaUtil = meses;
-        }
-
-        localStorage.setItem('promart_maestro_json', JSON.stringify(maestroSkuMap));
-        alert(`✅ SKU ${skuLimpio} actualizado a ${meses} meses.`);
-        document.getElementById('admin-sku').value = "";
-        document.getElementById('admin-meses').value = "";
-    }
-
-    function procesarArchivoExcel(event) {
-        let file = event.target.files[0];
-        if (!file) return;
-
-        let reader = new FileReader();
-
-        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-            reader.onload = function (e) {
-                let data = new Uint8Array(e.target.result);
-                let workbook = XLSX.read(data, { type: 'array' });
-                let primeraHoja = workbook.SheetNames[0];
-                let jsonExcel = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja]);
-                procesarDatosDeExcel(jsonExcel);
-            };
-            reader.readAsArrayBuffer(file);
-        } else if (file.name.endsWith('.json')) {
-            reader.onload = function (e) {
-                try {
-                    let jsonExcel = JSON.parse(e.target.result);
-                    procesarDatosDeExcel(jsonExcel);
-                } catch (err) {
-                    alert("Error al leer el archivo JSON.");
-                }
-            };
-            reader.readAsText(file);
-        }
-    }
-
-    function procesarDatosDeExcel(filas) {
-        if (!Array.isArray(filas)) return;
-        maestroSkuMap = {};
-
-        filas.forEach(item => {
-            let skuVal = "", descVal = "", vidaVal = "0";
-
-            for (let llave in item) {
-                let keyMin = llave.toLowerCase();
-                let valStr = String(item[llave]).trim();
-
-                if ((keyMin.includes("sku") || keyMin.includes("art") || keyMin.includes("mat")) && valStr.length >= 4 && valStr.length <= 8 && !isNaN(valStr)) {
-                    skuVal = valStr;
-                }
-                if (keyMin.includes("descrip") || (keyMin.includes("articulo") && valStr.match(/[a-zA-Z]/))) {
-                    descVal = valStr;
-                }
-                if (keyMin.includes("vida") || keyMin.includes("util") || keyMin.includes("fv")) {
-                    vidaVal = valStr;
-                }
-            }
-
-            let skuLimpio = limpiarCodigo(skuVal);
-            if (skuLimpio) {
-                maestroSkuMap[skuLimpio] = {
-                    sku: skuLimpio,
-                    descripcion: descVal || "Sin descripción",
-                    vidaUtil: vidaVal
-                };
-                let skuSinCeros = skuLimpio.replace(/^0+/, '');
-                if (skuSinCeros !== skuLimpio && skuSinCeros !== "") {
-                    maestroSkuMap[skuSinCeros] = maestroSkuMap[skuLimpio];
-                }
-            }
-        });
-
-        let horaActual = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        try {
-            localStorage.setItem('promart_maestro_json', JSON.stringify(maestroSkuMap));
-            localStorage.setItem('promart_hora_actualizacion', horaActual);
-        } catch(e) {}
-
-        document.getElementById('txt-status').innerText = `✅ Base FV actualizada correctamente (${horaActual})`;
-        document.getElementById('input-escaneo').focus();
     }
 
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
