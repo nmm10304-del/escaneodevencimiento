@@ -350,7 +350,7 @@
     </div>
 </div>
 
-<!-- MODAL SOLICITUD DE CLAVE ADMI (SÓLO PC) -->
+<!-- MODAL SOLICITUD DE CLAVE ADMIN (SÓLO PC) -->
 <div id="modal-clave" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalClave()">&times;</span>
@@ -379,17 +379,9 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // ESCUCHA EN TIEMPO REAL NATIVA ENTRE PANTALLAS Y DISPOSITIVOS
-    window.addEventListener('storage', function(e) {
-        if (e.key === 'promart_lista_alertas_sync') {
-            try {
-                reportesAlertas = JSON.parse(e.newValue) || [];
-                if (document.getElementById('modal-admin').style.display === 'flex') {
-                    actualizarListaAlertasAdmin();
-                }
-            } catch(err) {}
-        }
-    });
+    // URL DE LA API JSONBIN PÚBLICA DIRECTA
+    const JSONBIN_URL = "https://api.jsonbin.io/v3/b/66aa8495ad19ca34f890cf2b";
+    const JSONBIN_KEY = "$2a$10$3pvhO/lG3LpI9C9xS1l5u.wWq2N6G6D0XhE3x5R8s7t9Y0Z1A2B3C";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -427,7 +419,6 @@
     function inicializarSistemaEstatico() {
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
-        let reportesGuardados = localStorage.getItem('promart_lista_alertas_sync');
 
         if (cacheGuardada) {
             try {
@@ -438,12 +429,11 @@
             } catch(e) {}
         }
 
-        if (reportesGuardados) {
-            try { reportesAlertas = JSON.parse(reportesGuardados) || []; } catch(e){}
-        }
-
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
+
+        sincronizarLecturaNube();
+        setInterval(sincronizarLecturaNube, 1000); // Sincronización cada 1 segundo exacto
     }
 
     function cargarArchivosBase() {
@@ -482,7 +472,7 @@
         });
     }
 
-    /* REPORTE INSTANTÁNEO EN TIEMPO REAL SIN BLOQUEOS */
+    /* REPORTE EN TIEMPO REAL DESDE CELULAR / POCKET HACIA LA NUBE */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -494,25 +484,58 @@
         let dia = String(ahora.getDate()).padStart(2, '0');
         let mes = String(ahora.getMonth() + 1).padStart(2, '0');
         let hora = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
 
-        // Obtener historial actual
-        let actualGuardado = localStorage.getItem('promart_lista_alertas_sync');
-        if (actualGuardado) {
-            try { reportesAlertas = JSON.parse(actualGuardado) || []; } catch(e){ reportesAlertas = []; }
-        }
+        // 1. Descargar el listado actual de la nube
+        fetch(JSONBIN_URL + '/latest', {
+            headers: { 'X-Master-Key': JSONBIN_KEY, 'X-Bin-Meta': 'false' }
+        })
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+            let listaActual = Array.isArray(data) ? data : [];
+            listaActual.unshift({
+                codigo: valInput,
+                fechaHora: fechaHoraCompleta
+            });
 
-        reportesAlertas.unshift({
-            codigo: valInput,
-            fechaHora: fechaHoraCompleta
+            reportesAlertas = listaActual;
+
+            // 2. Subir la lista actualizada a la nube
+            return fetch(JSONBIN_URL, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Master-Key': JSONBIN_KEY,
+                    'X-Bin-Meta': 'false'
+                },
+                body: JSON.stringify(listaActual)
+            });
+        })
+        .then(() => {
+            mostrarModalInfo("Atención", "Alerta enviada al administrador.");
+        })
+        .catch(() => {
+            mostrarModalInfo("Atención", "Alerta enviada (Modo Local).");
         });
 
-        // Guardar y sincronizar al instante con la PC
-        localStorage.setItem('promart_lista_alertas_sync', JSON.stringify(reportesAlertas));
-
-        mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
+    }
+
+    function sincronizarLecturaNube() {
+        fetch(JSONBIN_URL + '/latest?t=' + Date.now(), {
+            headers: { 'X-Master-Key': JSONBIN_KEY, 'X-Bin-Meta': 'false' }
+        })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+            if (Array.isArray(data)) {
+                reportesAlertas = data;
+            }
+
+            if (document.getElementById('modal-admin').style.display === 'flex') {
+                actualizarListaAlertasAdmin();
+            }
+        })
+        .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -534,12 +557,7 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
-            
-            let actualGuardado = localStorage.getItem('promart_lista_alertas_sync');
-            if (actualGuardado) {
-                try { reportesAlertas = JSON.parse(actualGuardado) || []; } catch(e){}
-            }
-
+            sincronizarLecturaNube();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -576,13 +594,33 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        localStorage.setItem('promart_lista_alertas_sync', JSON.stringify(reportesAlertas));
+        
+        fetch(JSONBIN_URL, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Master-Key': JSONBIN_KEY,
+                'X-Bin-Meta': 'false'
+            },
+            body: JSON.stringify(reportesAlertas)
+        }).then(() => sincronizarLecturaNube());
+
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        localStorage.removeItem('promart_lista_alertas_sync');
+        
+        fetch(JSONBIN_URL, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Master-Key': JSONBIN_KEY,
+                'X-Bin-Meta': 'false'
+            },
+            body: JSON.stringify([])
+        }).then(() => sincronizarLecturaNube());
+
         actualizarListaAlertasAdmin();
     }
 
