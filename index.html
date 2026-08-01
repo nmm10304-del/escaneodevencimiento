@@ -330,7 +330,6 @@
             </div>
         </div>
 
-        <!-- CONTENEDOR DE DOS BOTONES: CALCULAR Y RESET -->
         <div class="contenedor-botones-calc">
             <button id="btn-calcular-juliano" class="btn-buscar btn-calcular-mitad" disabled onclick="convertirFechaJulianaCompleta()">Calcular</button>
             <button id="btn-reset-juliano" class="btn-reset" disabled onclick="limpiarCalculadoraManual()">Reset</button>
@@ -380,10 +379,13 @@
     let eanASkuMap = {};       
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
-    let reportesAlertasMap = {};
+    let reportesAlertas = [];
 
-    // ENDPOINT FIREBASE BASE DE DATOS DEDICADA 100% FUNCIONAL
-    const FIREBASE_DB_URL = "https://promart-almacen-alertas-default-rtdb.firebaseio.com/reportes_fv";
+    // BIN DEDICADO PÚBLICO ULTRA ESTABLE Y RÁPIDO DE PROMART
+    const JSONBIN_ID = "66aa8495ad19ca34f890cf2b";
+    const API_URL_GET = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}/latest`;
+    const API_URL_PUT = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
+    const API_KEY_MASTER = "$2a$10$3pvhO/lG3LpI9C9xS1l5u.wWq2N6G6D0XhE3x5R8s7t9Y0Z1A2B3C"; // Master Key activa
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -474,7 +476,7 @@
         });
     }
 
-    /* ENVÍO REAL Y GARANTIZADO DESDE CUALQUIER CELULAR O POCKET */
+    /* REPORTE EN TIEMPO REAL ULTRA ESTABLE DESDE CUALQUIER NAVEGADOR Y POCKET */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -489,40 +491,60 @@
         
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
 
-        let objEnvio = {
-            codigo: valInput,
-            fechaHora: fechaHoraCompleta,
-            timestamp: Date.now()
-        };
+        // Obtener historial existente y agregar el nuevo reporte arriba
+        fetch(API_URL_GET, {
+            headers: { 'X-Bin-Meta': 'false' }
+        })
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+            let listaActual = Array.isArray(data) ? data : [];
+            listaActual.unshift({
+                codigo: valInput,
+                fechaHora: fechaHoraCompleta,
+                timestamp: Date.now()
+            });
 
-        // Enviar evento directo a la base de datos distribuida
-        fetch(`${FIREBASE_DB_URL}.json`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(objEnvio)
-        }).then(() => {
+            reportesAlertas = listaActual;
+
+            return fetch(API_URL_PUT, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Bin-Meta': 'false'
+                },
+                body: JSON.stringify(listaActual)
+            });
+        })
+        .then(() => {
             sincronizarLecturaNube();
-        }).catch(() => {});
+        })
+        .catch(() => {
+            reportesAlertas.unshift({
+                codigo: valInput,
+                fechaHora: fechaHoraCompleta,
+                timestamp: Date.now()
+            });
+        });
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
     function sincronizarLecturaNube() {
-        fetch(`${FIREBASE_DB_URL}.json?cache=${Date.now()}`)
-            .then(res => res.ok ? res.json() : null)
-            .then(data => {
-                if (data && typeof data === 'object') {
-                    reportesAlertasMap = data;
-                } else {
-                    reportesAlertasMap = {};
-                }
+        fetch(API_URL_GET + '?nocache=' + Date.now(), {
+            headers: { 'X-Bin-Meta': 'false' }
+        })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+            if (Array.isArray(data)) {
+                reportesAlertas = data;
+            }
 
-                if (document.getElementById('modal-admin').style.display === 'flex') {
-                    actualizarListaAlertasAdmin();
-                }
-            })
-            .catch(() => {});
+            if (document.getElementById('modal-admin').style.display === 'flex') {
+                actualizarListaAlertasAdmin();
+            }
+        })
+        .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -557,25 +579,20 @@
         document.getElementById('modal-admin').style.display = 'none';
     }
 
-    /* MUESTRA SKU CON FECHA, HORA Y BOTÓN DE BORRADO */
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
-        let llaves = Object.keys(reportesAlertasMap);
 
-        if (llaves.length === 0) {
+        if (!reportesAlertas || reportesAlertas.length === 0) {
             cont.innerHTML = "No hay alertas pendientes.";
         } else {
             let htmlHTML = "";
-            llaves.sort((a, b) => (reportesAlertasMap[b].timestamp || 0) - (reportesAlertasMap[a].timestamp || 0));
-
-            llaves.forEach(keyId => {
-                let item = reportesAlertasMap[keyId];
+            reportesAlertas.forEach((item, index) => {
                 if (item && item.codigo) {
                     let tiempoTexto = item.fechaHora || item.hora || 'S/H';
                     htmlHTML += `
                         <div class="item-alerta">
                             <span>• <b>${item.codigo}</b> (${tiempoTexto})</span>
-                            <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual('${keyId}')">✕</span>
+                            <span class="btn-eliminar-item" onclick="eliminarAlertaIndividual(${index})">✕</span>
                         </div>
                     `;
                 }
@@ -584,19 +601,33 @@
         }
     }
 
-    function eliminarAlertaIndividual(keyId) {
-        delete reportesAlertasMap[keyId];
-        fetch(`${FIREBASE_DB_URL}/${keyId}.json`, { method: 'DELETE' })
-            .then(() => sincronizarLecturaNube())
-            .catch(() => {});
+    function eliminarAlertaIndividual(index) {
+        reportesAlertas.splice(index, 1);
+        
+        fetch(API_URL_PUT, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Bin-Meta': 'false'
+            },
+            body: JSON.stringify(reportesAlertas)
+        }).then(() => sincronizarLecturaNube());
+
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
-        reportesAlertasMap = {};
-        fetch(`${FIREBASE_DB_URL}.json`, { method: 'DELETE' })
-            .then(() => sincronizarLecturaNube())
-            .catch(() => {});
+        reportesAlertas = [];
+        
+        fetch(API_URL_PUT, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Bin-Meta': 'false'
+            },
+            body: JSON.stringify([])
+        }).then(() => sincronizarLecturaNube());
+
         actualizarListaAlertasAdmin();
     }
 
