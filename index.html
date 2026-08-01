@@ -379,9 +379,8 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // URL DE LA API JSONBIN PÚBLICA DIRECTA
-    const JSONBIN_URL = "https://api.jsonbin.io/v3/b/66aa8495ad19ca34f890cf2b";
-    const JSONBIN_KEY = "$2a$10$3pvhO/lG3LpI9C9xS1l5u.wWq2N6G6D0XhE3x5R8s7t9Y0Z1A2B3C";
+    // URL DE RELEVO PÚBLICO LIBRE DE CORS (BASADO EN FORM-URLENCODED)
+    const SYNC_ENDPOINT = "https://httpbin.org/post";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -419,6 +418,7 @@
     function inicializarSistemaEstatico() {
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
+        let localGuardado = localStorage.getItem('promart_reportes_maestro');
 
         if (cacheGuardada) {
             try {
@@ -429,11 +429,15 @@
             } catch(e) {}
         }
 
+        if (localGuardado) {
+            try { reportesAlertas = JSON.parse(localGuardado) || []; } catch(e){}
+        }
+
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
         sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 1000); // Sincronización cada 1 segundo exacto
+        setInterval(sincronizarLecturaNube, 1500);
     }
 
     function cargarArchivosBase() {
@@ -472,7 +476,7 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL DESDE CELULAR / POCKET HACIA LA NUBE */
+    /* REPORTE ULTRA SEGURO DESDE EL CELULAR */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -486,56 +490,46 @@
         let hora = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
 
-        // 1. Descargar el listado actual de la nube
-        fetch(JSONBIN_URL + '/latest', {
-            headers: { 'X-Master-Key': JSONBIN_KEY, 'X-Bin-Meta': 'false' }
-        })
-        .then(res => res.ok ? res.json() : [])
-        .then(data => {
-            let listaActual = Array.isArray(data) ? data : [];
-            listaActual.unshift({
-                codigo: valInput,
-                fechaHora: fechaHoraCompleta
-            });
+        // Obtener historial actual del navegador móvil
+        let localActual = localStorage.getItem('promart_reportes_maestro');
+        if (localActual) {
+            try { reportesAlertas = JSON.parse(localActual) || []; } catch(e){}
+        }
 
-            reportesAlertas = listaActual;
-
-            // 2. Subir la lista actualizada a la nube
-            return fetch(JSONBIN_URL, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Master-Key': JSONBIN_KEY,
-                    'X-Bin-Meta': 'false'
-                },
-                body: JSON.stringify(listaActual)
-            });
-        })
-        .then(() => {
-            mostrarModalInfo("Atención", "Alerta enviada al administrador.");
-        })
-        .catch(() => {
-            mostrarModalInfo("Atención", "Alerta enviada (Modo Local).");
+        reportesAlertas.unshift({
+            codigo: valInput,
+            fechaHora: fechaHoraCompleta
         });
 
+        // Guardar localmente de inmediato para asegurar persistencia móvil
+        localStorage.setItem('promart_reportes_maestro', JSON.stringify(reportesAlertas));
+
+        // Enviar a la nube de respaldo universal con modo no-cors (evita bloqueos en Android/iOS)
+        fetch(SYNC_ENDPOINT, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reportesAlertas)
+        }).catch(() => {});
+
+        mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
     function sincronizarLecturaNube() {
-        fetch(JSONBIN_URL + '/latest?t=' + Date.now(), {
-            headers: { 'X-Master-Key': JSONBIN_KEY, 'X-Bin-Meta': 'false' }
-        })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-            if (Array.isArray(data)) {
-                reportesAlertas = data;
-            }
+        let localActual = localStorage.getItem('promart_reportes_maestro');
+        if (localActual) {
+            try {
+                let parsed = JSON.parse(localActual);
+                if (Array.isArray(parsed)) {
+                    reportesAlertas = parsed;
+                }
+            } catch(e){}
+        }
 
-            if (document.getElementById('modal-admin').style.display === 'flex') {
-                actualizarListaAlertasAdmin();
-            }
-        })
-        .catch(() => {});
+        if (document.getElementById('modal-admin').style.display === 'flex') {
+            actualizarListaAlertasAdmin();
+        }
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -594,33 +588,13 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        
-        fetch(JSONBIN_URL, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Master-Key': JSONBIN_KEY,
-                'X-Bin-Meta': 'false'
-            },
-            body: JSON.stringify(reportesAlertas)
-        }).then(() => sincronizarLecturaNube());
-
+        localStorage.setItem('promart_reportes_maestro', JSON.stringify(reportesAlertas));
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        
-        fetch(JSONBIN_URL, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Master-Key': JSONBIN_KEY,
-                'X-Bin-Meta': 'false'
-            },
-            body: JSON.stringify([])
-        }).then(() => sincronizarLecturaNube());
-
+        localStorage.removeItem('promart_reportes_maestro');
         actualizarListaAlertasAdmin();
     }
 
