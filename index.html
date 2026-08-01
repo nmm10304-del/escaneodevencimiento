@@ -101,6 +101,10 @@
             transition: background 0.2s;
         }
         .btn-buscar:hover { background: #e65c00; }
+        .btn-buscar:disabled {
+            background: #cccccc !important;
+            cursor: not-allowed;
+        }
         
         .btn-alerta {
             background: #dc3545;
@@ -147,14 +151,6 @@
             text-align: left;
         }
 
-        .subseccion-box title {
-            font-weight: bold;
-            font-size: 14px;
-            color: #ff6a00;
-            display: block;
-            margin-bottom: 6px;
-        }
-
         input {
             width: 100%;
             padding: 11px;
@@ -167,6 +163,7 @@
         input:disabled {
             background-color: #e9ecef;
             cursor: not-allowed;
+            opacity: 0.6;
         }
 
         .contenedor-mes-anio {
@@ -285,27 +282,27 @@
     <div id="txt-status" class="info-status">✅ Sistema listo</div>
 
     <div class="seccion-juliana">
-        <h2>Consulta Juliana + Vencimiento</h2>
+        <h2>Vencimiento del producto</h2>
         <p>Calcula la fecha real de fabricación y proyecta el vencimiento exacto</p>
 
-        <!-- SUBSECCIÓN 1: DÍA JULIANO -->
+        <!-- SUBSECCIÓN 1: FECHA JULIANA -->
         <div class="subseccion-box">
-            <span style="font-weight: bold; color: #ff6a00; font-size: 14px;">1. Por Día Juliano:</span>
-            <input type="tel" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
-            <input type="tel" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+            <span style="font-weight: bold; color: #ff6a00; font-size: 14px;">Fecha Juliana:</span>
+            <input type="tel" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año" disabled onkeydown="bloquearLetras(event)" oninput="gestionarBloqueoMutuo('juliano')">
+            <input type="tel" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos" disabled onkeydown="bloquearLetras(event)" oninput="gestionarBloqueoMutuo('juliano')">
         </div>
 
-        <!-- SUBSECCIÓN 2: FECHA QUE INDICA EL PRODUCTO (MES / AÑO) -->
+        <!-- SUBSECCIÓN 2: FECHA QUE INDICA EL PRODUCTO -->
         <div class="subseccion-box">
-            <span style="font-weight: bold; color: #ff6a00; font-size: 14px;">2. Fecha que indica el producto (Mes / Año):</span>
+            <span style="font-weight: bold; color: #ff6a00; font-size: 14px;">Fecha que indica el producto:</span>
             <div class="contenedor-mes-anio">
-                <input type="tel" id="prod-mes" inputmode="numeric" pattern="[0-9]*" placeholder="MM (01-12)" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+                <input type="tel" id="prod-mes" inputmode="numeric" pattern="[0-9]*" placeholder="mm" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="gestionarBloqueoMutuo('producto')">
                 <span class="slash-separador">/</span>
-                <input type="tel" id="prod-anio" inputmode="numeric" pattern="[0-9]*" placeholder="AA (Ej: 26)" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+                <input type="tel" id="prod-anio" inputmode="numeric" pattern="[0-9]*" placeholder="yy" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="gestionarBloqueoMutuo('producto')">
             </div>
         </div>
 
-        <button id="btn-calcular-juliano" class="btn-buscar" disabled onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
+        <button id="btn-calcular-juliano" class="btn-buscar" disabled onclick="convertirFechaJulianaCompleta()">Calcular</button>
 
         <div class="panel-resultado-juliano">
             <div id="res-fabricacion" class="linea-res"><b>Fecha Real:</b> ---</div>
@@ -587,6 +584,53 @@
         }
     });
 
+    // LÓGICA DE BLOQUEO MUTUO ENTRE OPCIONES Y AUTOAVANCE
+    function gestionarBloqueoMutuo(origen) {
+        let inputAnio = document.getElementById('anio');
+        let inputJuliano = document.getElementById('juliano');
+        let inputMes = document.getElementById('prod-mes');
+        let inputProdAnio = document.getElementById('prod-anio');
+
+        limpiarValorDirecto(event.target);
+
+        let tieneJuliano = inputAnio.value.trim() !== "" || inputJuliano.value.trim() !== "";
+        let tieneProducto = inputMes.value.trim() !== "" || inputProdAnio.value.trim() !== "";
+
+        if (mesesVidaUtilActual <= 0) return;
+
+        if (origen === 'juliano') {
+            if (tieneJuliano) {
+                inputMes.disabled = true;
+                inputProdAnio.disabled = true;
+                inputMes.value = "";
+                inputProdAnio.value = "";
+            } else {
+                inputMes.disabled = false;
+                inputProdAnio.disabled = false;
+            }
+        } else if (origen === 'producto') {
+            if (tieneProducto) {
+                inputAnio.disabled = true;
+                inputJuliano.disabled = true;
+                inputAnio.value = "";
+                inputJuliano.value = "";
+            } else {
+                inputAnio.disabled = false;
+                inputJuliano.disabled = false;
+            }
+
+            // Auto-avance si el mes tiene 2 dígitos
+            if (event.target.id === 'prod-mes' && inputMes.value.length === 2) {
+                let mVal = parseInt(inputMes.value);
+                if (mVal > 12) inputMes.value = "12";
+                if (mVal < 1) inputMes.value = "01";
+                inputProdAnio.focus();
+            }
+        }
+
+        convertirFechaJulianaCompleta();
+    }
+
     function configurarEventosJulianosMóviles() {
         let inputsJul = [
             document.getElementById('anio'), 
@@ -596,23 +640,6 @@
         ];
 
         inputsJul.forEach(input => {
-            input.addEventListener('input', function() {
-                if (this.id === 'anio' && this.value.length > 4) this.value = this.value.slice(0, 4);
-                if (this.id === 'juliano' && this.value.length > 3) this.value = this.value.slice(0, 3);
-                if (this.id === 'prod-mes' && this.value.length > 2) this.value = this.value.slice(0, 2);
-                if (this.id === 'prod-anio' && this.value.length > 2) this.value = this.value.slice(0, 2);
-                
-                // Si escribe mes y llega a 2 dígitos, salta al año
-                if (this.id === 'prod-mes' && this.value.length === 2) {
-                    let mesVal = parseInt(this.value);
-                    if (mesVal > 12) this.value = "12";
-                    if (mesVal < 1) this.value = "01";
-                    document.getElementById('prod-anio').focus();
-                }
-
-                convertirFechaJulianaCompleta();
-            });
-
             input.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter' || e.keyCode === 13) {
                     convertirFechaJulianaCompleta();
@@ -754,7 +781,7 @@
 
         let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-        // OPCION 1: CÁLCULO VÍA FECHA IMPRESA (MES / AÑO)
+        // OPCIÓN 1: CÁLCULO VÍA FECHA IMPRESA EN PRODUCTO (MM / YY)
         if (mesProdInput !== "" && anioProdInput !== "") {
             let mesInt = parseInt(mesProdInput);
             let anioInt = parseInt(anioProdInput);
@@ -770,13 +797,13 @@
                 let mesV = (fechaVencimiento.getMonth() + 1).toString().padStart(2, '0');
                 let anioV = fechaVencimiento.getFullYear();
 
-                contenedorFab.innerHTML = `<b>Fecha Real:</b> 01/${mesProdInput.padStart(2, '0')}/${anioInt}`;
+                contenedorFab.innerHTML = `<b>Fecha Real:</b> 01/${String(mesInt).padStart(2, '0')}/${anioInt}`;
                 contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]} )</span>`;
                 return;
             }
         }
 
-        // OPCION 2: CÁLCULO VÍA DÍA JULIANO
+        // OPCIÓN 2: CÁLCULO VÍA FECHA JULIANA
         if (anioInput !== "" && julianoInput !== "") {
             let anio = parseInt(anioInput.replace(/\D/g,''));
             let juliano = parseInt(julianoInput.replace(/\D/g,''));
