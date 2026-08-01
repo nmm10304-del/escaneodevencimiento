@@ -105,6 +105,33 @@
             background: #cccccc !important;
             cursor: not-allowed;
         }
+
+        /* CONTENEDOR DOS BOTONES (CALCULAR Y RESET) */
+        .contenedor-botones-calc {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .btn-reset {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            width: 40%;
+            transition: background 0.2s;
+        }
+        .btn-reset:hover { background: #5a6268; }
+        .btn-reset:disabled { background: #cccccc !important; cursor: not-allowed; }
+
+        .btn-calcular-mitad {
+            width: 60%;
+            margin-top: 0;
+        }
         
         .btn-alerta {
             background: #dc3545;
@@ -304,7 +331,11 @@
             </div>
         </div>
 
-        <button id="btn-calcular-juliano" class="btn-buscar" disabled onclick="convertirFechaJulianaCompleta()">Calcular</button>
+        <!-- CONTENEDOR DE DOS BOTONES: CALCULAR Y RESET -->
+        <div class="contenedor-botones-calc">
+            <button id="btn-calcular-juliano" class="btn-buscar btn-calcular-mitad" disabled onclick="convertirFechaJulianaCompleta()">Calcular</button>
+            <button id="btn-reset-juliano" class="btn-reset" disabled onclick="limpiarCalculadoraManual()">Reset</button>
+        </div>
 
         <div class="panel-resultado-juliano">
             <div id="res-fabricacion" class="linea-res"><b>Fecha Real:</b> ---</div>
@@ -352,7 +383,7 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // CANAL DIRECTO DE COMUNICACIÓN EN TIEMPO REAL SIN BLOQUEOS CORS
+    // ENDPOINT DE ALTA DISPONIBILIDAD PARA MIGRACIÓN INSTANTÁNEA
     const ENDPOINT_PROMART_SYNC = "https://ntfy.sh/promart_almacen_alertas_fv_2026";
 
     function bloquearLetras(e) {
@@ -404,7 +435,6 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Consulta en vivo continua cada 500 ms
         sincronizarLecturaNube();
         setInterval(sincronizarLecturaNube, 500);
     }
@@ -445,7 +475,7 @@
         });
     }
 
-    /* REPORTE ULTRA COMPATIBLE EN TIEMPO REAL */
+    /* REPORTE EN TIEMPO REAL CON FORMATO PLANO LIMPIO */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -456,7 +486,6 @@
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         let textoAlerta = `${valInput}|${hora}`;
 
-        // Enviar como evento directo formateado
         fetch(ENDPOINT_PROMART_SYNC, {
             method: 'POST',
             body: textoAlerta
@@ -466,7 +495,6 @@
         })
         .catch(() => {});
 
-        // Respaldo local
         reportesAlertas.unshift({ codigo: valInput, hora: hora });
         localStorage.setItem('promart_reportes_backup', JSON.stringify(reportesAlertas));
 
@@ -474,6 +502,7 @@
         document.getElementById('input-escaneo').value = "";
     }
 
+    /* FORMATO DE DECODIFICACIÓN LIMPIA PARA EL PANEL DE ADMINISTRADOR */
     function sincronizarLecturaNube() {
         fetch(`${ENDPOINT_PROMART_SYNC}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
@@ -486,11 +515,21 @@
                         try {
                             let parsed = JSON.parse(linea);
                             if (parsed.message) {
-                                let partes = parsed.message.split('|');
-                                if (partes.length >= 2) {
+                                let mensaje = parsed.message.trim();
+
+                                // Si el mensaje viene como objeto JSON en string (corrección de la imagen)
+                                if (mensaje.startsWith('{') && mensaje.endsWith('}')) {
+                                    try {
+                                        let objInner = JSON.parse(mensaje);
+                                        if (objInner.codigo) {
+                                            acumulados.unshift({ codigo: objInner.codigo, hora: objInner.hora || 'S/H' });
+                                        }
+                                    } catch(e) {}
+                                } else if (mensaje.includes('|')) {
+                                    let partes = mensaje.split('|');
                                     acumulados.unshift({ codigo: partes[0], hora: partes[1] });
-                                } else if (parsed.message !== "CLEAR_ALL") {
-                                    acumulados.unshift({ codigo: parsed.message, hora: 'S/H' });
+                                } else if (mensaje !== "CLEAR_ALL") {
+                                    acumulados.unshift({ codigo: mensaje, hora: 'S/H' });
                                 }
                             }
                         } catch(e){}
@@ -546,6 +585,7 @@
         document.getElementById('modal-admin').style.display = 'none';
     }
 
+    /* RENDERIZADO CORREGIDO: SOLO MUESTRA SKU (HORA) [X] */
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
         if (!reportesAlertas || reportesAlertas.length === 0) {
@@ -591,7 +631,7 @@
         }
     });
 
-    // LÓGICA DE BLOQUEO MUTUO
+    // LÓGICA DE BLOQUEO MUTUO Y RE-HABILITACIÓN
     function gestionarBloqueoMutuo(origen) {
         let inputAnio = document.getElementById('anio');
         let inputJuliano = document.getElementById('juliano');
@@ -648,6 +688,25 @@
         convertirFechaJulianaCompleta();
     }
 
+    function limpiarCalculadoraManual() {
+        document.getElementById('anio').value = "";
+        document.getElementById('juliano').value = "";
+        document.getElementById('prod-dia').value = "";
+        document.getElementById('prod-mes').value = "";
+        document.getElementById('prod-anio').value = "";
+
+        if (mesesVidaUtilActual > 0) {
+            document.getElementById('anio').disabled = false;
+            document.getElementById('juliano').disabled = false;
+            document.getElementById('prod-dia').disabled = false;
+            document.getElementById('prod-mes').disabled = false;
+            document.getElementById('prod-anio').disabled = false;
+        }
+
+        document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> Ingrese datos";
+        document.getElementById('res-vencimiento').innerHTML = "<b>Vence el:</b> ---";
+    }
+
     function configurarEventosJulianosMóviles() {
         let inputsJul = [
             document.getElementById('anio'), 
@@ -676,6 +735,7 @@
         let inputMes = document.getElementById('prod-mes');
         let inputProdAnio = document.getElementById('prod-anio');
         let btnCalcular = document.getElementById('btn-calcular-juliano');
+        let btnReset = document.getElementById('btn-reset-juliano');
 
         if (habilitar) {
             inputAnio.disabled = false;
@@ -684,6 +744,7 @@
             inputMes.disabled = false;
             inputProdAnio.disabled = false;
             btnCalcular.disabled = false;
+            btnReset.disabled = false;
             document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> Ingrese datos";
             document.getElementById('res-vencimiento').innerHTML = "<b>Vence el:</b> ---";
         } else {
@@ -693,11 +754,8 @@
             inputMes.disabled = true;
             inputProdAnio.disabled = true;
             btnCalcular.disabled = true;
-            inputAnio.value = "";
-            inputJuliano.value = "";
-            inputDia.value = "";
-            inputMes.value = "";
-            inputProdAnio.value = "";
+            btnReset.disabled = true;
+            limpiarCalculadoraManual();
             document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> ---";
             document.getElementById('res-vencimiento').innerHTML = "<b>Vence el:</b> <span style='color: #666;'>Escanea un producto con vida útil primero</span>";
         }
@@ -821,7 +879,6 @@
                     if (diaInt > maxDiasMes) diaInt = maxDiasMes;
                     if (diaInt < 1) diaInt = 1;
                 } else {
-                    // SI NO HAY DÍA: Se calcula desde el último día del mes
                     diaInt = new Date(anioInt, mesInt, 0).getDate();
                 }
 
