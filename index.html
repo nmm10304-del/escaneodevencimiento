@@ -352,10 +352,8 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    const BIN_ID = "66a01122e4101579f1938a11"; 
-    const API_URL_NUBE = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
-    const API_URL_LATEST = `https://api.jsonbin.io/v3/b/${BIN_ID}/latest`;
-    const MASTER_KEY = "$2a$10$w82E/N12k9O4bV9S0g0Fz.w2.yK1b2C3d4E5f6G7H8I9J0K1L2M3N";
+    // CANAL DIRECTO DE COMUNICACIÓN EN TIEMPO REAL SIN BLOQUEOS CORS
+    const ENDPOINT_PROMART_SYNC = "https://ntfy.sh/promart_almacen_alertas_fv_2026";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -406,6 +404,7 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
+        // Consulta en vivo continua cada 500 ms
         sincronizarLecturaNube();
         setInterval(sincronizarLecturaNube, 500);
     }
@@ -446,6 +445,7 @@
         });
     }
 
+    /* REPORTE ULTRA COMPATIBLE EN TIEMPO REAL */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -454,58 +454,64 @@
         }
 
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        let textoAlerta = `${valInput}|${hora}`;
 
-        let nuevaLista = Array.isArray(reportesAlertas) ? [...reportesAlertas] : [];
-        nuevaLista.unshift({ codigo: valInput, hora: hora });
-        reportesAlertas = nuevaLista;
+        // Enviar como evento directo formateado
+        fetch(ENDPOINT_PROMART_SYNC, {
+            method: 'POST',
+            body: textoAlerta
+        })
+        .then(() => {
+            sincronizarLecturaNube();
+        })
+        .catch(() => {});
 
-        localStorage.setItem('promart_reportes_local', JSON.stringify(nuevaLista));
-
-        subirListaNube(nuevaLista);
+        // Respaldo local
+        reportesAlertas.unshift({ codigo: valInput, hora: hora });
+        localStorage.setItem('promart_reportes_backup', JSON.stringify(reportesAlertas));
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
     function sincronizarLecturaNube() {
-        fetch(API_URL_LATEST + '?cache=' + Date.now(), {
-            method: 'GET',
-            headers: {
-                'X-Master-Key': MASTER_KEY,
-                'X-Bin-Meta': 'false'
-            }
-        })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-            if (Array.isArray(data)) {
-                reportesAlertas = data;
-            } else if (data && data.record && Array.isArray(data.record)) {
-                reportesAlertas = data.record;
-            }
+        fetch(`${ENDPOINT_PROMART_SYNC}/json?poll=1`)
+            .then(res => res.ok ? res.text() : "")
+            .then(textoBruto => {
+                if (textoBruto) {
+                    let lineas = textoBruto.trim().split('\n');
+                    let acumulados = [];
+                    
+                    lineas.forEach(linea => {
+                        try {
+                            let parsed = JSON.parse(linea);
+                            if (parsed.message) {
+                                let partes = parsed.message.split('|');
+                                if (partes.length >= 2) {
+                                    acumulados.unshift({ codigo: partes[0], hora: partes[1] });
+                                } else if (parsed.message !== "CLEAR_ALL") {
+                                    acumulados.unshift({ codigo: parsed.message, hora: 'S/H' });
+                                }
+                            }
+                        } catch(e){}
+                    });
 
-            if (document.getElementById('modal-admin').style.display === 'flex') {
-                actualizarListaAlertasAdmin();
-            }
-        })
-        .catch(() => {
-            let local = localStorage.getItem('promart_reportes_local');
-            if (local) {
-                try { reportesAlertas = JSON.parse(local); } catch(e){}
-            }
-        });
-    }
+                    if (acumulados.length > 0) {
+                        reportesAlertas = acumulados;
+                        localStorage.setItem('promart_reportes_backup', JSON.stringify(acumulados));
+                    }
+                }
 
-    function subirListaNube(nuevaLista) {
-        fetch(API_URL_NUBE, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Master-Key': MASTER_KEY
-            },
-            body: JSON.stringify(nuevaLista)
-        })
-        .then(() => sincronizarLecturaNube())
-        .catch(() => {});
+                if (document.getElementById('modal-admin').style.display === 'flex') {
+                    actualizarListaAlertasAdmin();
+                }
+            })
+            .catch(() => {
+                let backup = localStorage.getItem('promart_reportes_backup');
+                if (backup) {
+                    try { reportesAlertas = JSON.parse(backup); } catch(e){}
+                }
+            });
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -562,15 +568,14 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        localStorage.setItem('promart_reportes_local', JSON.stringify(reportesAlertas));
-        subirListaNube(reportesAlertas);
+        localStorage.setItem('promart_reportes_backup', JSON.stringify(reportesAlertas));
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        localStorage.setItem('promart_reportes_local', JSON.stringify([]));
-        subirListaNube([]);
+        localStorage.removeItem('promart_reportes_backup');
+        fetch(ENDPOINT_PROMART_SYNC, { method: 'POST', body: 'CLEAR_ALL' }).catch(() => {});
         actualizarListaAlertasAdmin();
     }
 
@@ -586,7 +591,7 @@
         }
     });
 
-    // LÓGICA DE BLOQUEO MUTUO ENTRE OPCIONES Y AUTOAVANCE
+    // LÓGICA DE BLOQUEO MUTUO
     function gestionarBloqueoMutuo(origen) {
         let inputAnio = document.getElementById('anio');
         let inputJuliano = document.getElementById('juliano');
@@ -625,7 +630,6 @@
                 inputJuliano.disabled = false;
             }
 
-            // Auto-avances
             if (event.target.id === 'prod-dia' && inputDia.value.length === 2) {
                 let dVal = parseInt(inputDia.value);
                 if (dVal > 31) inputDia.value = "31";
@@ -801,16 +805,15 @@
 
         let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-        // OPCIÓN 1: CÁLCULO VÍA FECHA IMPRESA EN PRODUCTO (DD / MM / YY)
+        // CÁLCULO FECHA IMPRESA EN PRODUCTO
         if (mesProdInput !== "" && anioProdInput !== "") {
             let mesInt = parseInt(mesProdInput);
             let anioInt = parseInt(anioProdInput);
 
             if (mesInt >= 1 && mesInt <= 12 && !isNaN(anioInt)) {
-                if (anioInt < 100) anioInt += 2000; // Ej: 26 -> 2026
+                if (anioInt < 100) anioInt += 2000;
 
                 let diaInt = 1;
-                let usandoUltimoDia = false;
 
                 if (diaProdInput !== "") {
                     diaInt = parseInt(diaProdInput);
@@ -818,9 +821,8 @@
                     if (diaInt > maxDiasMes) diaInt = maxDiasMes;
                     if (diaInt < 1) diaInt = 1;
                 } else {
-                    // SI NO SE INGRESA DÍA: Se toma por defecto el último día del mes
+                    // SI NO HAY DÍA: Se calcula desde el último día del mes
                     diaInt = new Date(anioInt, mesInt, 0).getDate();
-                    usandoUltimoDia = true;
                 }
 
                 let fechaFabricacion = new Date(anioInt, mesInt - 1, diaInt);
@@ -837,7 +839,7 @@
             }
         }
 
-        // OPCIÓN 2: CÁLCULO VÍA FECHA JULIANA
+        // CÁLCULO FECHA JULIANA
         if (anioInput !== "" && julianoInput !== "") {
             let anio = parseInt(anioInput.replace(/\D/g,''));
             let juliano = parseInt(julianoInput.replace(/\D/g,''));
