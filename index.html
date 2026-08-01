@@ -169,7 +169,7 @@
         .contenedor-mes-anio {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             margin-top: 8px;
         }
 
@@ -180,7 +180,7 @@
         }
 
         .slash-separador {
-            font-size: 20px;
+            font-size: 18px;
             font-weight: bold;
             color: #ff6a00;
         }
@@ -296,6 +296,8 @@
         <div class="subseccion-box">
             <span style="font-weight: bold; color: #ff6a00; font-size: 14px;">Fecha que indica el producto:</span>
             <div class="contenedor-mes-anio">
+                <input type="tel" id="prod-dia" inputmode="numeric" pattern="[0-9]*" placeholder="dd" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="gestionarBloqueoMutuo('producto')">
+                <span class="slash-separador">/</span>
                 <input type="tel" id="prod-mes" inputmode="numeric" pattern="[0-9]*" placeholder="mm" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="gestionarBloqueoMutuo('producto')">
                 <span class="slash-separador">/</span>
                 <input type="tel" id="prod-anio" inputmode="numeric" pattern="[0-9]*" placeholder="yy" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="gestionarBloqueoMutuo('producto')">
@@ -588,23 +590,27 @@
     function gestionarBloqueoMutuo(origen) {
         let inputAnio = document.getElementById('anio');
         let inputJuliano = document.getElementById('juliano');
+        let inputDia = document.getElementById('prod-dia');
         let inputMes = document.getElementById('prod-mes');
         let inputProdAnio = document.getElementById('prod-anio');
 
         limpiarValorDirecto(event.target);
 
         let tieneJuliano = inputAnio.value.trim() !== "" || inputJuliano.value.trim() !== "";
-        let tieneProducto = inputMes.value.trim() !== "" || inputProdAnio.value.trim() !== "";
+        let tieneProducto = inputDia.value.trim() !== "" || inputMes.value.trim() !== "" || inputProdAnio.value.trim() !== "";
 
         if (mesesVidaUtilActual <= 0) return;
 
         if (origen === 'juliano') {
             if (tieneJuliano) {
+                inputDia.disabled = true;
                 inputMes.disabled = true;
                 inputProdAnio.disabled = true;
+                inputDia.value = "";
                 inputMes.value = "";
                 inputProdAnio.value = "";
             } else {
+                inputDia.disabled = false;
                 inputMes.disabled = false;
                 inputProdAnio.disabled = false;
             }
@@ -619,7 +625,14 @@
                 inputJuliano.disabled = false;
             }
 
-            // Auto-avance si el mes tiene 2 dígitos
+            // Auto-avances
+            if (event.target.id === 'prod-dia' && inputDia.value.length === 2) {
+                let dVal = parseInt(inputDia.value);
+                if (dVal > 31) inputDia.value = "31";
+                if (dVal < 1) inputDia.value = "01";
+                inputMes.focus();
+            }
+
             if (event.target.id === 'prod-mes' && inputMes.value.length === 2) {
                 let mVal = parseInt(inputMes.value);
                 if (mVal > 12) inputMes.value = "12";
@@ -635,6 +648,7 @@
         let inputsJul = [
             document.getElementById('anio'), 
             document.getElementById('juliano'),
+            document.getElementById('prod-dia'),
             document.getElementById('prod-mes'),
             document.getElementById('prod-anio')
         ];
@@ -654,6 +668,7 @@
     function controlarEstadoCalculadora(habilitar) {
         let inputAnio = document.getElementById('anio');
         let inputJuliano = document.getElementById('juliano');
+        let inputDia = document.getElementById('prod-dia');
         let inputMes = document.getElementById('prod-mes');
         let inputProdAnio = document.getElementById('prod-anio');
         let btnCalcular = document.getElementById('btn-calcular-juliano');
@@ -661,6 +676,7 @@
         if (habilitar) {
             inputAnio.disabled = false;
             inputJuliano.disabled = false;
+            inputDia.disabled = false;
             inputMes.disabled = false;
             inputProdAnio.disabled = false;
             btnCalcular.disabled = false;
@@ -669,11 +685,13 @@
         } else {
             inputAnio.disabled = true;
             inputJuliano.disabled = true;
+            inputDia.disabled = true;
             inputMes.disabled = true;
             inputProdAnio.disabled = true;
             btnCalcular.disabled = true;
             inputAnio.value = "";
             inputJuliano.value = "";
+            inputDia.value = "";
             inputMes.value = "";
             inputProdAnio.value = "";
             document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> ---";
@@ -773,6 +791,8 @@
 
         let anioInput = document.getElementById("anio").value.trim();
         let julianoInput = document.getElementById("juliano").value.trim();
+        
+        let diaProdInput = document.getElementById("prod-dia").value.trim();
         let mesProdInput = document.getElementById("prod-mes").value.trim();
         let anioProdInput = document.getElementById("prod-anio").value.trim();
 
@@ -781,7 +801,7 @@
 
         let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-        // OPCIÓN 1: CÁLCULO VÍA FECHA IMPRESA EN PRODUCTO (MM / YY)
+        // OPCIÓN 1: CÁLCULO VÍA FECHA IMPRESA EN PRODUCTO (DD / MM / YY)
         if (mesProdInput !== "" && anioProdInput !== "") {
             let mesInt = parseInt(mesProdInput);
             let anioInt = parseInt(anioProdInput);
@@ -789,7 +809,21 @@
             if (mesInt >= 1 && mesInt <= 12 && !isNaN(anioInt)) {
                 if (anioInt < 100) anioInt += 2000; // Ej: 26 -> 2026
 
-                let fechaFabricacion = new Date(anioInt, mesInt - 1, 1);
+                let diaInt = 1;
+                let usandoUltimoDia = false;
+
+                if (diaProdInput !== "") {
+                    diaInt = parseInt(diaProdInput);
+                    let maxDiasMes = new Date(anioInt, mesInt, 0).getDate();
+                    if (diaInt > maxDiasMes) diaInt = maxDiasMes;
+                    if (diaInt < 1) diaInt = 1;
+                } else {
+                    // SI NO SE INGRESA DÍA: Se toma por defecto el último día del mes
+                    diaInt = new Date(anioInt, mesInt, 0).getDate();
+                    usandoUltimoDia = true;
+                }
+
+                let fechaFabricacion = new Date(anioInt, mesInt - 1, diaInt);
                 let fechaVencimiento = new Date(fechaFabricacion.getTime());
                 fechaVencimiento.setMonth(fechaVencimiento.getMonth() + mesesVidaUtilActual);
 
@@ -797,7 +831,7 @@
                 let mesV = (fechaVencimiento.getMonth() + 1).toString().padStart(2, '0');
                 let anioV = fechaVencimiento.getFullYear();
 
-                contenedorFab.innerHTML = `<b>Fecha Real:</b> 01/${String(mesInt).padStart(2, '0')}/${anioInt}`;
+                contenedorFab.innerHTML = `<b>Fecha Real:</b> ${String(diaInt).padStart(2, '0')}/${String(mesInt).padStart(2, '0')}/${anioInt}`;
                 contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]} )</span>`;
                 return;
             }
