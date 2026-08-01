@@ -106,7 +106,6 @@
             cursor: not-allowed;
         }
 
-        /* CONTENEDOR DOS BOTONES (CALCULAR Y RESET) */
         .contenedor-botones-calc {
             display: flex;
             gap: 10px;
@@ -382,8 +381,8 @@
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
+    let reportesEliminadosLocal = new Set(); // REGISTRO DE ELIMINACIONES PERMANENTES
 
-    // ENDPOINT DE ALTA DISPONIBILIDAD PARA MIGRACIÓN INSTANTÁNEA
     const ENDPOINT_PROMART_SYNC = "https://ntfy.sh/promart_almacen_alertas_fv_2026";
 
     function bloquearLetras(e) {
@@ -422,6 +421,7 @@
     function inicializarSistemaEstatico() {
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
+        let eliminadosGuardados = localStorage.getItem('promart_eliminados');
 
         if (cacheGuardada) {
             try {
@@ -430,6 +430,10 @@
                     document.getElementById('txt-status').innerText = `✅ Base FV activa (${horaGuardada})`;
                 }
             } catch(e) {}
+        }
+
+        if (eliminadosGuardados) {
+            try { reportesEliminadosLocal = new Set(JSON.parse(eliminadosGuardados)); } catch(e){}
         }
 
         cargarArchivosBase();
@@ -475,7 +479,6 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL CON FORMATO PLANO LIMPIO */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -495,14 +498,13 @@
         })
         .catch(() => {});
 
-        reportesAlertas.unshift({ codigo: valInput, hora: hora });
-        localStorage.setItem('promart_reportes_backup', JSON.stringify(reportesAlertas));
-
+        reportesAlertas.unshift({ codigo: valInput, hora: hora, idUnico: `${valInput}_${hora}` });
+        
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* FORMATO DE DECODIFICACIÓN LIMPIA PARA EL PANEL DE ADMINISTRADOR */
+    /* FILTRADO ULTRA-LIMPIO Y DECODIFICADOR AUTOMÁTICO DE OBJETOS VIEJOS */
     function sincronizarLecturaNube() {
         fetch(`${ENDPOINT_PROMART_SYNC}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
@@ -516,41 +518,45 @@
                             let parsed = JSON.parse(linea);
                             if (parsed.message) {
                                 let mensaje = parsed.message.trim();
+                                let codigoFinal = "";
+                                let horaFinal = "S/H";
 
-                                // Si el mensaje viene como objeto JSON en string (corrección de la imagen)
+                                // SI ES UN JSON OBJETO VIEJO (Ej: {"codigo":"164251","hora":"10:05 p.m."})
                                 if (mensaje.startsWith('{') && mensaje.endsWith('}')) {
                                     try {
                                         let objInner = JSON.parse(mensaje);
                                         if (objInner.codigo) {
-                                            acumulados.unshift({ codigo: objInner.codigo, hora: objInner.hora || 'S/H' });
+                                            codigoFinal = String(objInner.codigo).trim();
+                                            horaFinal = objInner.hora || "S/H";
                                         }
                                     } catch(e) {}
                                 } else if (mensaje.includes('|')) {
                                     let partes = mensaje.split('|');
-                                    acumulados.unshift({ codigo: partes[0], hora: partes[1] });
+                                    codigoFinal = partes[0].trim();
+                                    horaFinal = partes[1].trim();
                                 } else if (mensaje !== "CLEAR_ALL") {
-                                    acumulados.unshift({ codigo: mensaje, hora: 'S/H' });
+                                    codigoFinal = mensaje;
+                                }
+
+                                if (codigoFinal) {
+                                    let idUnico = `${codigoFinal}_${horaFinal}`;
+                                    // SOLO SE AGREGA SI NO HA SIDO ELIMINADO ANTES
+                                    if (!reportesEliminadosLocal.has(idUnico)) {
+                                        acumulados.unshift({ codigo: codigoFinal, hora: horaFinal, idUnico: idUnico });
+                                    }
                                 }
                             }
                         } catch(e){}
                     });
 
-                    if (acumulados.length > 0) {
-                        reportesAlertas = acumulados;
-                        localStorage.setItem('promart_reportes_backup', JSON.stringify(acumulados));
-                    }
+                    reportesAlertas = acumulados;
                 }
 
                 if (document.getElementById('modal-admin').style.display === 'flex') {
                     actualizarListaAlertasAdmin();
                 }
             })
-            .catch(() => {
-                let backup = localStorage.getItem('promart_reportes_backup');
-                if (backup) {
-                    try { reportesAlertas = JSON.parse(backup); } catch(e){}
-                }
-            });
+            .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -585,7 +591,7 @@
         document.getElementById('modal-admin').style.display = 'none';
     }
 
-    /* RENDERIZADO CORREGIDO: SOLO MUESTRA SKU (HORA) [X] */
+    /* MUESTRA ÚNICAMENTE SKU (HORA) [X] EN EL PANEL */
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
         if (!reportesAlertas || reportesAlertas.length === 0) {
@@ -606,15 +612,28 @@
         }
     }
 
+    /* ELIMINACIÓN LOCAL PERMANENTE PARA QUE NO VUELVA A APARECER */
     function eliminarAlertaIndividual(index) {
+        let item = reportesAlertas[index];
+        if (item) {
+            if (item.idUnico) {
+                reportesEliminadosLocal.add(item.idUnico);
+            }
+            reportesEliminadosLocal.add(`${item.codigo}_${item.hora}`);
+            localStorage.setItem('promart_eliminados', JSON.stringify(Array.from(reportesEliminadosLocal)));
+        }
         reportesAlertas.splice(index, 1);
-        localStorage.setItem('promart_reportes_backup', JSON.stringify(reportesAlertas));
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
+        reportesAlertas.forEach(item => {
+            if (item && item.codigo) {
+                reportesEliminadosLocal.add(`${item.codigo}_${item.hora}`);
+            }
+        });
         reportesAlertas = [];
-        localStorage.removeItem('promart_reportes_backup');
+        localStorage.setItem('promart_eliminados', JSON.stringify(Array.from(reportesEliminadosLocal)));
         fetch(ENDPOINT_PROMART_SYNC, { method: 'POST', body: 'CLEAR_ALL' }).catch(() => {});
         actualizarListaAlertasAdmin();
     }
@@ -631,7 +650,6 @@
         }
     });
 
-    // LÓGICA DE BLOQUEO MUTUO Y RE-HABILITACIÓN
     function gestionarBloqueoMutuo(origen) {
         let inputAnio = document.getElementById('anio');
         let inputJuliano = document.getElementById('juliano');
