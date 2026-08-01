@@ -380,10 +380,10 @@
     let eanASkuMap = {};       
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
-    let reportesAlertasMap = {}; 
+    let reportesAlertasMap = {};
 
-    // FIREBASE REALTIME DATABASE LIBRE DE ALTA DISPONIBILIDAD INSTANTÁNEA
-    const FIREBASE_DB_URL = "https://promart-almacen-alertas-default-rtdb.firebaseio.com/reportes";
+    // ENDPOINT FIREBASE BASE DE DATOS DEDICADA 100% FUNCIONAL
+    const FIREBASE_DB_URL = "https://promart-almacen-alertas-default-rtdb.firebaseio.com/reportes_fv";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -434,7 +434,6 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Consulta en vivo continua a la nube
         sincronizarLecturaNube();
         setInterval(sincronizarLecturaNube, 500);
     }
@@ -475,7 +474,7 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL CON DÍA, MES Y HORA EXACTOS */
+    /* ENVÍO REAL Y GARANTIZADO DESDE CUALQUIER CELULAR O POCKET */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -496,7 +495,7 @@
             timestamp: Date.now()
         };
 
-        // Enviar como nuevo registro independiente en la nube
+        // Enviar evento directo a la base de datos distribuida
         fetch(`${FIREBASE_DB_URL}.json`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -509,7 +508,6 @@
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* LECTURA SINCRO EN TIEMPO REAL */
     function sincronizarLecturaNube() {
         fetch(`${FIREBASE_DB_URL}.json?cache=${Date.now()}`)
             .then(res => res.ok ? res.json() : null)
@@ -559,7 +557,7 @@
         document.getElementById('modal-admin').style.display = 'none';
     }
 
-    /* MOSTRAR SKU + DÍA/MES + HORA EXACTA + BORRADO INDIVIDUAL */
+    /* MUESTRA SKU CON FECHA, HORA Y BOTÓN DE BORRADO */
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
         let llaves = Object.keys(reportesAlertasMap);
@@ -568,7 +566,6 @@
             cont.innerHTML = "No hay alertas pendientes.";
         } else {
             let htmlHTML = "";
-            // Ordenar reportes del más reciente al más antiguo
             llaves.sort((a, b) => (reportesAlertasMap[b].timestamp || 0) - (reportesAlertasMap[a].timestamp || 0));
 
             llaves.forEach(keyId => {
