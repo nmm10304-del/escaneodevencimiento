@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -381,11 +382,49 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // BIN DEDICADO PÚBLICO ULTRA ESTABLE Y RÁPIDO DE PROMART
-    const JSONBIN_ID = "66aa8495ad19ca34f890cf2b";
-    const API_URL_GET = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}/latest`;
-    const API_URL_PUT = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
-    const API_KEY_MASTER = "$2a$10$3pvhO/lG3LpI9C9xS1l5u.wWq2N6G6D0XhE3x5R8s7t9Y0Z1A2B3C"; // Master Key activa
+    // SERVIDOR DE TRANSMISIÓN EN TIEMPO REAL VÍA WEBSOCKET
+    let socket = null;
+
+    function conectarWebSocketRealtime() {
+        try {
+            socket = io("https://pie-realtime-server.glitch.me", {
+                transports: ['websocket', 'polling']
+            });
+
+            socket.on('connect', () => {
+                socket.emit('join-room', 'promart_fv_almacen_channel');
+            });
+
+            socket.on('nueva-alerta', (data) => {
+                if (data && data.codigo) {
+                    reportesAlertas.unshift(data);
+                    guardarAlertasLocal();
+                    if (document.getElementById('modal-admin').style.display === 'flex') {
+                        actualizarListaAlertasAdmin();
+                    }
+                }
+            });
+
+            socket.on('limpiar-todo', () => {
+                reportesAlertas = [];
+                guardarAlertasLocal();
+                if (document.getElementById('modal-admin').style.display === 'flex') {
+                    actualizarListaAlertasAdmin();
+                }
+            });
+        } catch(e) {}
+    }
+
+    function guardarAlertasLocal() {
+        localStorage.setItem('promart_reportes_cache', JSON.stringify(reportesAlertas));
+    }
+
+    function cargarAlertasLocal() {
+        let cache = localStorage.getItem('promart_reportes_cache');
+        if (cache) {
+            try { reportesAlertas = JSON.parse(cache); } catch(e){}
+        }
+    }
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -433,11 +472,10 @@
             } catch(e) {}
         }
 
+        cargarAlertasLocal();
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
-
-        sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 500);
+        conectarWebSocketRealtime();
     }
 
     function cargarArchivosBase() {
@@ -476,7 +514,7 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL ULTRA ESTABLE DESDE CUALQUIER NAVEGADOR Y POCKET */
+    /* REPORTE EN TIEMPO REAL PURE WEBSOCKET */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -491,60 +529,22 @@
         
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
 
-        // Obtener historial existente y agregar el nuevo reporte arriba
-        fetch(API_URL_GET, {
-            headers: { 'X-Bin-Meta': 'false' }
-        })
-        .then(res => res.ok ? res.json() : [])
-        .then(data => {
-            let listaActual = Array.isArray(data) ? data : [];
-            listaActual.unshift({
-                codigo: valInput,
-                fechaHora: fechaHoraCompleta,
-                timestamp: Date.now()
-            });
+        let objEnvio = {
+            codigo: valInput,
+            fechaHora: fechaHoraCompleta,
+            idKey: Date.now() + "_" + Math.random().toString(36).substr(2, 5)
+        };
 
-            reportesAlertas = listaActual;
+        // Emitir evento por WebSocket si está conectado
+        if (socket && socket.connected) {
+            socket.emit('enviar-alerta', { room: 'promart_fv_almacen_channel', data: objEnvio });
+        }
 
-            return fetch(API_URL_PUT, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Bin-Meta': 'false'
-                },
-                body: JSON.stringify(listaActual)
-            });
-        })
-        .then(() => {
-            sincronizarLecturaNube();
-        })
-        .catch(() => {
-            reportesAlertas.unshift({
-                codigo: valInput,
-                fechaHora: fechaHoraCompleta,
-                timestamp: Date.now()
-            });
-        });
+        reportesAlertas.unshift(objEnvio);
+        guardarAlertasLocal();
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
-    }
-
-    function sincronizarLecturaNube() {
-        fetch(API_URL_GET + '?nocache=' + Date.now(), {
-            headers: { 'X-Bin-Meta': 'false' }
-        })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-            if (Array.isArray(data)) {
-                reportesAlertas = data;
-            }
-
-            if (document.getElementById('modal-admin').style.display === 'flex') {
-                actualizarListaAlertasAdmin();
-            }
-        })
-        .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -566,7 +566,6 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
-            sincronizarLecturaNube();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -603,31 +602,16 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        
-        fetch(API_URL_PUT, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Bin-Meta': 'false'
-            },
-            body: JSON.stringify(reportesAlertas)
-        }).then(() => sincronizarLecturaNube());
-
+        guardarAlertasLocal();
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        
-        fetch(API_URL_PUT, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Bin-Meta': 'false'
-            },
-            body: JSON.stringify([])
-        }).then(() => sincronizarLecturaNube());
-
+        guardarAlertasLocal();
+        if (socket && socket.connected) {
+            socket.emit('limpiar-alerta-global', { room: 'promart_fv_almacen_channel' });
+        }
         actualizarListaAlertasAdmin();
     }
 
