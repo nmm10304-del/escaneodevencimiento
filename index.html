@@ -137,10 +137,28 @@
             border-top: 2px dashed #ccc;
             text-align: center;
         }
+        
+        .subseccion-box {
+            background: #fff;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            margin-bottom: 12px;
+            text-align: left;
+        }
+
+        .subseccion-box title {
+            font-weight: bold;
+            font-size: 14px;
+            color: #ff6a00;
+            display: block;
+            margin-bottom: 6px;
+        }
+
         input {
             width: 100%;
             padding: 11px;
-            margin-top: 10px;
+            margin-top: 8px;
             border-radius: 6px;
             border: 1px solid #ccc;
             font-size: 15px;
@@ -149,6 +167,25 @@
         input:disabled {
             background-color: #e9ecef;
             cursor: not-allowed;
+        }
+
+        .contenedor-mes-anio {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .contenedor-mes-anio input {
+            margin-top: 0;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .slash-separador {
+            font-size: 20px;
+            font-weight: bold;
+            color: #ff6a00;
         }
 
         .panel-resultado-juliano {
@@ -251,8 +288,22 @@
         <h2>Consulta Juliana + Vencimiento</h2>
         <p>Calcula la fecha real de fabricación y proyecta el vencimiento exacto</p>
 
-        <input type="tel" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año (Ej: 2026)" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
-        <input type="tel" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos (Ej: 198)" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+        <!-- SUBSECCIÓN 1: DÍA JULIANO -->
+        <div class="subseccion-box">
+            <span style="font-weight: bold; color: #ff6a00; font-size: 14px;">1. Por Día Juliano:</span>
+            <input type="tel" id="anio" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte el año" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+            <input type="tel" id="juliano" inputmode="numeric" pattern="[0-9]*" placeholder="Inserte los 3 dígitos" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+        </div>
+
+        <!-- SUBSECCIÓN 2: FECHA QUE INDICA EL PRODUCTO (MES / AÑO) -->
+        <div class="subseccion-box">
+            <span style="font-weight: bold; color: #ff6a00; font-size: 14px;">2. Fecha que indica el producto (Mes / Año):</span>
+            <div class="contenedor-mes-anio">
+                <input type="tel" id="prod-mes" inputmode="numeric" pattern="[0-9]*" placeholder="MM (01-12)" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+                <span class="slash-separador">/</span>
+                <input type="tel" id="prod-anio" inputmode="numeric" pattern="[0-9]*" placeholder="AA (Ej: 26)" maxlength="2" disabled onkeydown="bloquearLetras(event)" oninput="limpiarValorDirecto(this)">
+            </div>
+        </div>
 
         <button id="btn-calcular-juliano" class="btn-buscar" disabled onclick="convertirFechaJulianaCompleta()">Convertir y Calcular</button>
 
@@ -302,9 +353,10 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // CANAL DE COMUNICACIÓN SERVERLESS DE ALTA DISPONIBILIDAD SIN BLOQUEO CORS
-    const ENDPOINT_PROMART_ALERTAS = "https://ntfy.sh/promart_almacen_alertas_fv_2026/json";
-    const ENDPOINT_ENVIAR = "https://ntfy.sh/promart_almacen_alertas_fv_2026";
+    const BIN_ID = "66a01122e4101579f1938a11"; 
+    const API_URL_NUBE = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+    const API_URL_LATEST = `https://api.jsonbin.io/v3/b/${BIN_ID}/latest`;
+    const MASTER_KEY = "$2a$10$w82E/N12k9O4bV9S0g0Fz.w2.yK1b2C3d4E5f6G7H8I9J0K1L2M3N";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -355,9 +407,8 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Carga inicial y escucha continua en vivo
         sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 3000);
+        setInterval(sincronizarLecturaNube, 500);
     }
 
     function cargarArchivosBase() {
@@ -396,7 +447,6 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL ULTRA COMPATIBLE CELULAR / POCKET / PC */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -405,61 +455,58 @@
         }
 
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        let objPayload = { codigo: valInput, hora: hora };
 
-        // Enviar evento directo libre
-        fetch(ENDPOINT_ENVIAR, {
-            method: 'POST',
-            body: JSON.stringify(objPayload)
-        })
-        .then(() => {
-            sincronizarLecturaNube();
-        })
-        .catch(() => {});
+        let nuevaLista = Array.isArray(reportesAlertas) ? [...reportesAlertas] : [];
+        nuevaLista.unshift({ codigo: valInput, hora: hora });
+        reportesAlertas = nuevaLista;
 
-        // Respaldo local
-        reportesAlertas.unshift(objPayload);
-        localStorage.setItem('promart_backup_alertas', JSON.stringify(reportesAlertas));
+        localStorage.setItem('promart_reportes_local', JSON.stringify(nuevaLista));
+
+        subirListaNube(nuevaLista);
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
     function sincronizarLecturaNube() {
-        fetch(ENDPOINT_PROMART_ALERTAS + '?poll=1')
-            .then(res => res.ok ? res.text() : "")
-            .then(textoBruto => {
-                if (textoBruto) {
-                    let lineas = textoBruto.trim().split('\n');
-                    let acumulados = [];
-                    lineas.forEach(linea => {
-                        try {
-                            let parsed = JSON.parse(linea);
-                            if (parsed.message) {
-                                let itemData = JSON.parse(parsed.message);
-                                if (itemData && itemData.codigo) {
-                                    acumulados.unshift(itemData);
-                                }
-                            }
-                        } catch(e){}
-                    });
+        fetch(API_URL_LATEST + '?cache=' + Date.now(), {
+            method: 'GET',
+            headers: {
+                'X-Master-Key': MASTER_KEY,
+                'X-Bin-Meta': 'false'
+            }
+        })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+            if (Array.isArray(data)) {
+                reportesAlertas = data;
+            } else if (data && data.record && Array.isArray(data.record)) {
+                reportesAlertas = data.record;
+            }
 
-                    if (acumulados.length > 0) {
-                        reportesAlertas = acumulados;
-                        localStorage.setItem('promart_backup_alertas', JSON.stringify(acumulados));
-                    }
-                }
+            if (document.getElementById('modal-admin').style.display === 'flex') {
+                actualizarListaAlertasAdmin();
+            }
+        })
+        .catch(() => {
+            let local = localStorage.getItem('promart_reportes_local');
+            if (local) {
+                try { reportesAlertas = JSON.parse(local); } catch(e){}
+            }
+        });
+    }
 
-                if (document.getElementById('modal-admin').style.display === 'flex') {
-                    actualizarListaAlertasAdmin();
-                }
-            })
-            .catch(() => {
-                let backup = localStorage.getItem('promart_backup_alertas');
-                if (backup) {
-                    try { reportesAlertas = JSON.parse(backup); } catch(e){}
-                }
-            });
+    function subirListaNube(nuevaLista) {
+        fetch(API_URL_NUBE, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Master-Key': MASTER_KEY
+            },
+            body: JSON.stringify(nuevaLista)
+        })
+        .then(() => sincronizarLecturaNube())
+        .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -516,13 +563,15 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        localStorage.setItem('promart_backup_alertas', JSON.stringify(reportesAlertas));
+        localStorage.setItem('promart_reportes_local', JSON.stringify(reportesAlertas));
+        subirListaNube(reportesAlertas);
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        localStorage.removeItem('promart_backup_alertas');
+        localStorage.setItem('promart_reportes_local', JSON.stringify([]));
+        subirListaNube([]);
         actualizarListaAlertasAdmin();
     }
 
@@ -539,13 +588,28 @@
     });
 
     function configurarEventosJulianosMóviles() {
-        let inputAnio = document.getElementById('anio');
-        let inputJuliano = document.getElementById('juliano');
+        let inputsJul = [
+            document.getElementById('anio'), 
+            document.getElementById('juliano'),
+            document.getElementById('prod-mes'),
+            document.getElementById('prod-anio')
+        ];
 
-        [inputAnio, inputJuliano].forEach(input => {
+        inputsJul.forEach(input => {
             input.addEventListener('input', function() {
                 if (this.id === 'anio' && this.value.length > 4) this.value = this.value.slice(0, 4);
                 if (this.id === 'juliano' && this.value.length > 3) this.value = this.value.slice(0, 3);
+                if (this.id === 'prod-mes' && this.value.length > 2) this.value = this.value.slice(0, 2);
+                if (this.id === 'prod-anio' && this.value.length > 2) this.value = this.value.slice(0, 2);
+                
+                // Si escribe mes y llega a 2 dígitos, salta al año
+                if (this.id === 'prod-mes' && this.value.length === 2) {
+                    let mesVal = parseInt(this.value);
+                    if (mesVal > 12) this.value = "12";
+                    if (mesVal < 1) this.value = "01";
+                    document.getElementById('prod-anio').focus();
+                }
+
                 convertirFechaJulianaCompleta();
             });
 
@@ -563,20 +627,28 @@
     function controlarEstadoCalculadora(habilitar) {
         let inputAnio = document.getElementById('anio');
         let inputJuliano = document.getElementById('juliano');
+        let inputMes = document.getElementById('prod-mes');
+        let inputProdAnio = document.getElementById('prod-anio');
         let btnCalcular = document.getElementById('btn-calcular-juliano');
 
         if (habilitar) {
             inputAnio.disabled = false;
             inputJuliano.disabled = false;
+            inputMes.disabled = false;
+            inputProdAnio.disabled = false;
             btnCalcular.disabled = false;
             document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> Ingrese datos";
             document.getElementById('res-vencimiento').innerHTML = "<b>Vence el:</b> ---";
         } else {
             inputAnio.disabled = true;
             inputJuliano.disabled = true;
+            inputMes.disabled = true;
+            inputProdAnio.disabled = true;
             btnCalcular.disabled = true;
             inputAnio.value = "";
             inputJuliano.value = "";
+            inputMes.value = "";
+            inputProdAnio.value = "";
             document.getElementById('res-fabricacion').innerHTML = "<b>Fecha Real:</b> ---";
             document.getElementById('res-vencimiento').innerHTML = "<b>Vence el:</b> <span style='color: #666;'>Escanea un producto con vida útil primero</span>";
         }
@@ -651,9 +723,7 @@
                 controlarEstadoCalculadora(false);
             }
             
-            if(document.getElementById("anio").value !== "" && document.getElementById("juliano").value !== "") {
-                convertirFechaJulianaCompleta();
-            }
+            convertirFechaJulianaCompleta();
         } else {
             document.getElementById('txt-desc').innerHTML = `<span class='error'>Código/SKU: ${lecturaIngresada} <br>Producto no registrado</span>`;
             document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ---`;
@@ -674,43 +744,70 @@
     function convertirFechaJulianaCompleta(){
         if (mesesVidaUtilActual <= 0) return;
 
-        let anioInput = document.getElementById("anio").value;
-        let julianoInput = document.getElementById("juliano").value;
+        let anioInput = document.getElementById("anio").value.trim();
+        let julianoInput = document.getElementById("juliano").value.trim();
+        let mesProdInput = document.getElementById("prod-mes").value.trim();
+        let anioProdInput = document.getElementById("prod-anio").value.trim();
+
         let contenedorFab = document.getElementById("res-fabricacion");
         let contenedorVen = document.getElementById("res-vencimiento");
 
-        if(anioInput === "" || julianoInput === ""){
-            contenedorFab.innerHTML = "<b>Fecha Real:</b> Ingrese datos";
-            contenedorVen.innerHTML = "<b>Vence el:</b> ---";
-            return;
-        }
-
-        let anio = parseInt(anioInput.replace(/\D/g,''));
-        let juliano = parseInt(julianoInput.replace(/\D/g,''));
-
-        let maxDias = esBisiesto(anio) ? 366 : 365;
-        if(juliano < 1 || juliano > maxDias || anio < 1000){
-            contenedorFab.innerHTML = "<span style='color: #dc3545;'>Año o día juliano incorrecto</span>";
-            contenedorVen.innerHTML = "<b>Vence el:</b> ---";
-            return;
-        }
-
-        let fechaFabricacion = new Date(anio, 0);
-        fechaFabricacion.setDate(juliano);
-
-        let diaF = fechaFabricacion.getDate().toString().padStart(2, '0');
-        let mesF = (fechaFabricacion.getMonth() + 1).toString().padStart(2, '0');
-        contenedorFab.innerHTML = `<b>Fecha Real:</b> ${diaF}/${mesF}/${anio}`;
-
-        let fechaVencimiento = new Date(fechaFabricacion.getTime());
-        fechaVencimiento.setMonth(fechaVencimiento.getMonth() + mesesVidaUtilActual);
-
-        let diaV = fechaVencimiento.getDate().toString().padStart(2, '0');
-        let mesV = (fechaVencimiento.getMonth() + 1).toString().padStart(2, '0');
-        let anioV = fechaVencimiento.getFullYear();
-
         let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-        contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]} )</span>`;
+
+        // OPCION 1: CÁLCULO VÍA FECHA IMPRESA (MES / AÑO)
+        if (mesProdInput !== "" && anioProdInput !== "") {
+            let mesInt = parseInt(mesProdInput);
+            let anioInt = parseInt(anioProdInput);
+
+            if (mesInt >= 1 && mesInt <= 12 && !isNaN(anioInt)) {
+                if (anioInt < 100) anioInt += 2000; // Ej: 26 -> 2026
+
+                let fechaFabricacion = new Date(anioInt, mesInt - 1, 1);
+                let fechaVencimiento = new Date(fechaFabricacion.getTime());
+                fechaVencimiento.setMonth(fechaVencimiento.getMonth() + mesesVidaUtilActual);
+
+                let diaV = fechaVencimiento.getDate().toString().padStart(2, '0');
+                let mesV = (fechaVencimiento.getMonth() + 1).toString().padStart(2, '0');
+                let anioV = fechaVencimiento.getFullYear();
+
+                contenedorFab.innerHTML = `<b>Fecha Real:</b> 01/${mesProdInput.padStart(2, '0')}/${anioInt}`;
+                contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]} )</span>`;
+                return;
+            }
+        }
+
+        // OPCION 2: CÁLCULO VÍA DÍA JULIANO
+        if (anioInput !== "" && julianoInput !== "") {
+            let anio = parseInt(anioInput.replace(/\D/g,''));
+            let juliano = parseInt(julianoInput.replace(/\D/g,''));
+
+            let maxDias = esBisiesto(anio) ? 366 : 365;
+            if(juliano < 1 || juliano > maxDias || anio < 1000){
+                contenedorFab.innerHTML = "<span style='color: #dc3545;'>Año o día juliano incorrecto</span>";
+                contenedorVen.innerHTML = "<b>Vence el:</b> ---";
+                return;
+            }
+
+            let fechaFabricacion = new Date(anio, 0);
+            fechaFabricacion.setDate(juliano);
+
+            let diaF = fechaFabricacion.getDate().toString().padStart(2, '0');
+            let mesF = (fechaFabricacion.getMonth() + 1).toString().padStart(2, '0');
+            contenedorFab.innerHTML = `<b>Fecha Real:</b> ${diaF}/${mesF}/${anio}`;
+
+            let fechaVencimiento = new Date(fechaFabricacion.getTime());
+            fechaVencimiento.setMonth(fechaVencimiento.getMonth() + mesesVidaUtilActual);
+
+            let diaV = fechaVencimiento.getDate().toString().padStart(2, '0');
+            let mesV = (fechaVencimiento.getMonth() + 1).toString().padStart(2, '0');
+            let anioV = fechaVencimiento.getFullYear();
+
+            contenedorVen.innerHTML = `<b>Vence el:</b> <span class="vence-alerta">${diaV}/${mesV}/${anioV} (${nombresMeses[fechaVencimiento.getMonth()]} )</span>`;
+            return;
+        }
+
+        contenedorFab.innerHTML = "<b>Fecha Real:</b> Ingrese datos";
+        contenedorVen.innerHTML = "<b>Vence el:</b> ---";
     }
 
     window.onload = inicializarSistemaEstatico;
