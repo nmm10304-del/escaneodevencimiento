@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -382,49 +381,24 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // SERVIDOR DE TRANSMISIÓN EN TIEMPO REAL VÍA WEBSOCKET
-    let socket = null;
+    // CANAL DE COMUNICACIÓN LOCAL COMPARTIDO NATIVO
+    const canalPromart = new BroadcastChannel('promart_almacen_sync_channel');
 
-    function conectarWebSocketRealtime() {
-        try {
-            socket = io("https://pie-realtime-server.glitch.me", {
-                transports: ['websocket', 'polling']
-            });
-
-            socket.on('connect', () => {
-                socket.emit('join-room', 'promart_fv_almacen_channel');
-            });
-
-            socket.on('nueva-alerta', (data) => {
-                if (data && data.codigo) {
-                    reportesAlertas.unshift(data);
-                    guardarAlertasLocal();
-                    if (document.getElementById('modal-admin').style.display === 'flex') {
-                        actualizarListaAlertasAdmin();
-                    }
-                }
-            });
-
-            socket.on('limpiar-todo', () => {
-                reportesAlertas = [];
-                guardarAlertasLocal();
+    canalPromart.onmessage = function (event) {
+        if (event.data) {
+            if (event.data.tipo === 'NUEVO_REPORTE') {
+                reportesAlertas = event.data.lista;
                 if (document.getElementById('modal-admin').style.display === 'flex') {
                     actualizarListaAlertasAdmin();
                 }
-            });
-        } catch(e) {}
-    }
-
-    function guardarAlertasLocal() {
-        localStorage.setItem('promart_reportes_cache', JSON.stringify(reportesAlertas));
-    }
-
-    function cargarAlertasLocal() {
-        let cache = localStorage.getItem('promart_reportes_cache');
-        if (cache) {
-            try { reportesAlertas = JSON.parse(cache); } catch(e){}
+            } else if (event.data.tipo === 'LIMPIAR_TODO') {
+                reportesAlertas = [];
+                if (document.getElementById('modal-admin').style.display === 'flex') {
+                    actualizarListaAlertasAdmin();
+                }
+            }
         }
-    }
+    };
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -462,6 +436,7 @@
     function inicializarSistemaEstatico() {
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
+        let reportesGuardados = localStorage.getItem('promart_reportes_activos');
 
         if (cacheGuardada) {
             try {
@@ -472,10 +447,12 @@
             } catch(e) {}
         }
 
-        cargarAlertasLocal();
+        if (reportesGuardados) {
+            try { reportesAlertas = JSON.parse(reportesGuardados); } catch(e){}
+        }
+
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
-        conectarWebSocketRealtime();
     }
 
     function cargarArchivosBase() {
@@ -514,7 +491,7 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL PURE WEBSOCKET */
+    /* REPORTE INSTANTÁNEO NATIVO SIN ERRORES */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -529,19 +506,22 @@
         
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
 
-        let objEnvio = {
+        let nuevoReporte = {
             codigo: valInput,
-            fechaHora: fechaHoraCompleta,
-            idKey: Date.now() + "_" + Math.random().toString(36).substr(2, 5)
+            fechaHora: fechaHoraCompleta
         };
 
-        // Emitir evento por WebSocket si está conectado
-        if (socket && socket.connected) {
-            socket.emit('enviar-alerta', { room: 'promart_fv_almacen_channel', data: objEnvio });
+        // Cargar actual de localStorage por si acaso
+        let guardados = localStorage.getItem('promart_reportes_activos');
+        if (guardados) {
+            try { reportesAlertas = JSON.parse(guardados); } catch(e){}
         }
 
-        reportesAlertas.unshift(objEnvio);
-        guardarAlertasLocal();
+        reportesAlertas.unshift(nuevoReporte);
+        localStorage.setItem('promart_reportes_activos', JSON.stringify(reportesAlertas));
+
+        // Enviar por canal nativo a todas las vistas abiertas
+        canalPromart.postMessage({ tipo: 'NUEVO_REPORTE', lista: reportesAlertas });
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
@@ -566,6 +546,13 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
+            
+            // Refrescar desde memoria local antes de abrir
+            let guardados = localStorage.getItem('promart_reportes_activos');
+            if (guardados) {
+                try { reportesAlertas = JSON.parse(guardados); } catch(e){}
+            }
+
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -587,7 +574,7 @@
             let htmlHTML = "";
             reportesAlertas.forEach((item, index) => {
                 if (item && item.codigo) {
-                    let tiempoTexto = item.fechaHora || item.hora || 'S/H';
+                    let tiempoTexto = item.fechaHora || 'S/H';
                     htmlHTML += `
                         <div class="item-alerta">
                             <span>• <b>${item.codigo}</b> (${tiempoTexto})</span>
@@ -602,16 +589,15 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        guardarAlertasLocal();
+        localStorage.setItem('promart_reportes_activos', JSON.stringify(reportesAlertas));
+        canalPromart.postMessage({ tipo: 'NUEVO_REPORTE', lista: reportesAlertas });
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        guardarAlertasLocal();
-        if (socket && socket.connected) {
-            socket.emit('limpiar-alerta-global', { room: 'promart_fv_almacen_channel' });
-        }
+        localStorage.removeItem('promart_reportes_activos');
+        canalPromart.postMessage({ tipo: 'LIMPIAR_TODO' });
         actualizarListaAlertasAdmin();
     }
 
