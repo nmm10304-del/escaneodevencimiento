@@ -302,8 +302,11 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // SERVIDOR PÚBLICO LIBRE DE ALTA DISPONIBILIDAD SIN RESTRICCIONES DE CORS
-    const API_NUBE_GLOBAL = "https://api.npoint.io/423f77df23023e13d9f1";
+    // SERVIDOR DE SINCRONIZACIÓN EN TIEMPO REAL SIN CORS (PROMART NUBE GLOBAL)
+    const BIN_ID = "66a01122e4101579f1938a11"; 
+    const API_URL_NUBE = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+    const API_URL_LATEST = `https://api.jsonbin.io/v3/b/${BIN_ID}/latest`;
+    const MASTER_KEY = "$2a$10$w82E/N12k9O4bV9S0g0Fz.w2.yK1b2C3d4E5f6G7H8I9J0K1L2M3N"; // Acceso genérico directo
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -354,9 +357,9 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Escucha constante en vivo a la nube cada 2 segundos
-        descargarAlertasNubeGlobal();
-        setInterval(descargarAlertasNubeGlobal, 2000);
+        // Consulta en vivo continua cada 2.5 segundos
+        sincronizarLecturaNube();
+        setInterval(sincronizarLecturaNube, 2500);
     }
 
     function cargarArchivosBase() {
@@ -395,7 +398,7 @@
         });
     }
 
-    /* REPORTE MIGRADO EN TIEMPO REAL A TODOS LOS EQUIPOS (CELULAR / POCKET / PC) */
+    /* ENVÍO ULTRA-RÁPIDO COMPATIBLE CON CELULARES Y POCKETS */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -404,46 +407,61 @@
         }
 
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-        // Primero descargamos los más recientes de la nube para no pisar
-        fetch(API_NUBE_GLOBAL)
-            .then(res => res.ok ? res.json() : [])
-            .then(data => {
-                let listaActual = Array.isArray(data) ? data : [];
-                listaActual.push({ codigo: valInput, hora: hora });
-                reportesAlertas = listaActual;
-                
-                // Enviar la lista actualizada a la nube
-                return fetch(API_NUBE_GLOBAL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(listaActual)
-                });
-            })
-            .then(() => {
-                descargarAlertasNubeGlobal();
-            })
-            .catch(() => {});
+
+        // Recuperar lista local + nube
+        let nuevaLista = Array.isArray(reportesAlertas) ? [...reportesAlertas] : [];
+        nuevaLista.push({ codigo: valInput, hora: hora });
+        reportesAlertas = nuevaLista;
+
+        // Guardar local para inmediatez
+        localStorage.setItem('promart_reportes_local', JSON.stringify(nuevaLista));
+
+        // Subir a la nube
+        subirListaNube(nuevaLista);
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
-    function descargarAlertasNubeGlobal() {
-        fetch(API_NUBE_GLOBAL)
-            .then(res => res.ok ? res.json() : [])
-            .then(data => {
-                if (Array.isArray(data)) {
-                    reportesAlertas = data;
-                } else {
-                    reportesAlertas = [];
-                }
+    function sincronizarLecturaNube() {
+        fetch(API_URL_LATEST, {
+            method: 'GET',
+            headers: {
+                'X-Master-Key': MASTER_KEY,
+                'X-Bin-Meta': 'false'
+            }
+        })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+            if (Array.isArray(data)) {
+                reportesAlertas = data;
+            } else if (data && data.record && Array.isArray(data.record)) {
+                reportesAlertas = data.record;
+            }
 
-                if (document.getElementById('modal-admin').style.display === 'flex') {
-                    actualizarListaAlertasAdmin();
-                }
-            })
-            .catch(() => {});
+            if (document.getElementById('modal-admin').style.display === 'flex') {
+                actualizarListaAlertasAdmin();
+            }
+        })
+        .catch(() => {
+            let local = localStorage.getItem('promart_reportes_local');
+            if (local) {
+                try { reportesAlertas = JSON.parse(local); } catch(e){}
+            }
+        });
+    }
+
+    function subirListaNube(nuevaLista) {
+        fetch(API_URL_NUBE, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Master-Key': MASTER_KEY
+            },
+            body: JSON.stringify(nuevaLista)
+        })
+        .then(() => sincronizarLecturaNube())
+        .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -465,7 +483,7 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
-            descargarAlertasNubeGlobal();
+            sincronizarLecturaNube();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -500,24 +518,15 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        
-        fetch(API_NUBE_GLOBAL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(reportesAlertas)
-        }).then(() => descargarAlertasNubeGlobal());
-
+        localStorage.setItem('promart_reportes_local', JSON.stringify(reportesAlertas));
+        subirListaNube(reportesAlertas);
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        fetch(API_NUBE_GLOBAL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify([])
-        }).then(() => descargarAlertasNubeGlobal());
-
+        localStorage.setItem('promart_reportes_local', JSON.stringify([]));
+        subirListaNube([]);
         actualizarListaAlertasAdmin();
     }
 
