@@ -330,7 +330,6 @@
             </div>
         </div>
 
-        <!-- CONTENEDOR DE DOS BOTONES: CALCULAR Y RESET -->
         <div class="contenedor-botones-calc">
             <button id="btn-calcular-juliano" class="btn-buscar btn-calcular-mitad" disabled onclick="convertirFechaJulianaCompleta()">Calcular</button>
             <button id="btn-reset-juliano" class="btn-reset" disabled onclick="limpiarCalculadoraManual()">Reset</button>
@@ -381,8 +380,9 @@
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
-    let reportesEliminadosLocal = new Set(); // REGISTRO DE ELIMINACIONES PERMANENTES
+    let reportesEliminadosLocal = new Set();
 
+    // CANAL DE COMUNICACIÓN DE ALTA VELOCIDAD LIBRE
     const ENDPOINT_PROMART_SYNC = "https://ntfy.sh/promart_almacen_alertas_fv_2026";
 
     function bloquearLetras(e) {
@@ -479,6 +479,7 @@
         });
     }
 
+    /* REPORTE ULTRA GARANTIZADO MÓVIL/PC CON TIMESTAMP ÚNICO */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -487,24 +488,19 @@
         }
 
         let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        let textoAlerta = `${valInput}|${hora}`;
+        let stampMilies = Date.now();
+        let textoAlerta = `${valInput}|${hora}|${stampMilies}`;
 
         fetch(ENDPOINT_PROMART_SYNC, {
             method: 'POST',
             body: textoAlerta
-        })
-        .then(() => {
-            sincronizarLecturaNube();
-        })
-        .catch(() => {});
+        }).catch(() => {});
 
-        reportesAlertas.unshift({ codigo: valInput, hora: hora, idUnico: `${valInput}_${hora}` });
-        
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* FILTRADO ULTRA-LIMPIO Y DECODIFICADOR AUTOMÁTICO DE OBJETOS VIEJOS */
+    /* DECODIFICADOR ROBUSTO Y FILTRO EN TIEMPO REAL */
     function sincronizarLecturaNube() {
         fetch(`${ENDPOINT_PROMART_SYNC}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
@@ -520,30 +516,30 @@
                                 let mensaje = parsed.message.trim();
                                 let codigoFinal = "";
                                 let horaFinal = "S/H";
+                                let idUnico = "";
 
-                                // SI ES UN JSON OBJETO VIEJO (Ej: {"codigo":"164251","hora":"10:05 p.m."})
                                 if (mensaje.startsWith('{') && mensaje.endsWith('}')) {
                                     try {
                                         let objInner = JSON.parse(mensaje);
                                         if (objInner.codigo) {
                                             codigoFinal = String(objInner.codigo).trim();
                                             horaFinal = objInner.hora || "S/H";
+                                            idUnico = `${codigoFinal}_${horaFinal}`;
                                         }
                                     } catch(e) {}
                                 } else if (mensaje.includes('|')) {
                                     let partes = mensaje.split('|');
                                     codigoFinal = partes[0].trim();
                                     horaFinal = partes[1].trim();
+                                    let stamp = partes[2] || '';
+                                    idUnico = `${codigoFinal}_${horaFinal}_${stamp}`;
                                 } else if (mensaje !== "CLEAR_ALL") {
                                     codigoFinal = mensaje;
+                                    idUnico = `${codigoFinal}_S/H`;
                                 }
 
-                                if (codigoFinal) {
-                                    let idUnico = `${codigoFinal}_${horaFinal}`;
-                                    // SOLO SE AGREGA SI NO HA SIDO ELIMINADO ANTES
-                                    if (!reportesEliminadosLocal.has(idUnico)) {
-                                        acumulados.unshift({ codigo: codigoFinal, hora: horaFinal, idUnico: idUnico });
-                                    }
+                                if (codigoFinal && !reportesEliminadosLocal.has(idUnico) && !reportesEliminadosLocal.has(`${codigoFinal}_${horaFinal}`)) {
+                                    acumulados.unshift({ codigo: codigoFinal, hora: horaFinal, idUnico: idUnico });
                                 }
                             }
                         } catch(e){}
@@ -591,7 +587,6 @@
         document.getElementById('modal-admin').style.display = 'none';
     }
 
-    /* MUESTRA ÚNICAMENTE SKU (HORA) [X] EN EL PANEL */
     function actualizarListaAlertasAdmin() {
         let cont = document.getElementById('lista-alertas');
         if (!reportesAlertas || reportesAlertas.length === 0) {
@@ -612,13 +607,10 @@
         }
     }
 
-    /* ELIMINACIÓN LOCAL PERMANENTE PARA QUE NO VUELVA A APARECER */
     function eliminarAlertaIndividual(index) {
         let item = reportesAlertas[index];
         if (item) {
-            if (item.idUnico) {
-                reportesEliminadosLocal.add(item.idUnico);
-            }
+            if (item.idUnico) reportesEliminadosLocal.add(item.idUnico);
             reportesEliminadosLocal.add(`${item.codigo}_${item.hora}`);
             localStorage.setItem('promart_eliminados', JSON.stringify(Array.from(reportesEliminadosLocal)));
         }
@@ -629,6 +621,7 @@
     function limpiarAlertasAdmin() {
         reportesAlertas.forEach(item => {
             if (item && item.codigo) {
+                if (item.idUnico) reportesEliminadosLocal.add(item.idUnico);
                 reportesEliminadosLocal.add(`${item.codigo}_${item.hora}`);
             }
         });
