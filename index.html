@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.2.2.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -247,7 +248,6 @@
             cursor: pointer;
             font-weight: bold;
         }
-        /* PERMITE MOSTRAR HASTA 10 ALERTAS CON SCROLL */
         .lista-reportes {
             max-height: 320px;
             overflow-y: auto;
@@ -379,9 +379,42 @@
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
-    let reportesBorradosLocal = new Set(); // SET DE BORRADOS PERMANENTES EN PC
+    let reportesBorradosLocal = new Set();
 
-    const CANAL_NUBE = "https://ntfy.sh/promart_reportes_almacen_general_2026";
+    // CONEXIÓN DIRECTA POR WEBSOCKETS PUROS PUBNUB (LIBRE DE CORS EN MÓVILES)
+    const pubnub = new PubNub({
+        publishKey: "pub-c-9d62d3a3-7bf1-4be3-b778-9e5871b96232",
+        subscribeKey: "sub-c-4e8c187c-3f9b-4e12-a1b9-38b9393a5222",
+        userId: "promart_usr_" + Math.random().toString(36).substring(2, 7)
+    });
+
+    pubnub.addListener({
+        message: function(event) {
+            if (event && event.message) {
+                let msg = event.message;
+                if (msg.tipo === "ALERTA") {
+                    if (!reportesBorradosLocal.has(msg.id)) {
+                        let existe = reportesAlertas.some(item => item.id === msg.id);
+                        if (!existe) {
+                            reportesAlertas.unshift(msg);
+                            if (document.getElementById('modal-admin').style.display === 'flex') {
+                                actualizarListaAlertasAdmin();
+                            }
+                        }
+                    }
+                } else if (msg.tipo === "LIMPIAR_TODO") {
+                    reportesAlertas = [];
+                    if (document.getElementById('modal-admin').style.display === 'flex') {
+                        actualizarListaAlertasAdmin();
+                    }
+                }
+            }
+        }
+    });
+
+    pubnub.subscribe({
+        channels: ['promart_almacen_live_channel']
+    });
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -443,8 +476,24 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 1000);
+        // Cargar historial reciente de la nube
+        pubnub.fetchMessages({
+            channels: ['promart_almacen_live_channel'],
+            count: 20
+        }, function(status, response) {
+            if (response && response.channels && response.channels['promart_almacen_live_channel']) {
+                let msgs = response.channels['promart_almacen_live_channel'];
+                let acumulados = [];
+                msgs.forEach(m => {
+                    if (m.message && m.message.tipo === "ALERTA") {
+                        if (!reportesBorradosLocal.has(m.message.id)) {
+                            acumulados.unshift(m.message);
+                        }
+                    }
+                });
+                reportesAlertas = acumulados;
+            }
+        });
     }
 
     function cargarArchivosBase() {
@@ -483,7 +532,7 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL CON ID ÚNICO DE TRANSMISIÓN */
+    /* REPORTE WEBSOCKET DIRECTO SIN CUALQUIER TIPO DE BLOQUEO */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -498,60 +547,22 @@
         let mes = String(ahora.getMonth() + 1).padStart(2, '0');
         let hora = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
-        let stampId = Date.now();
+        let stampId = Date.now() + "_" + Math.random().toString(36).substring(2, 6);
 
-        // Enviar con ID único de marca temporal
-        let mensaje = `${valInput}___${fechaHoraCompleta}___${stampId}`;
+        let payload = {
+            tipo: "ALERTA",
+            id: stampId,
+            codigo: valInput,
+            fechaHora: fechaHoraCompleta
+        };
 
-        fetch(CANAL_NUBE, {
-            method: 'POST',
-            body: mensaje
-        }).then(() => {
-            sincronizarLecturaNube();
-        }).catch(() => {});
+        pubnub.publish({
+            channel: 'promart_almacen_live_channel',
+            message: payload
+        });
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
-    }
-
-    /* LECTURA EN TIEMPO REAL CON FILTRADO DE BORRADOS Y SIN LÍMITE DE CAPACIDAD */
-    function sincronizarLecturaNube() {
-        fetch(`${CANAL_NUBE}/json?poll=1`)
-            .then(res => res.ok ? res.text() : "")
-            .then(textoBruto => {
-                if (textoBruto) {
-                    let lineas = textoBruto.trim().split('\n');
-                    let listaNuevos = [];
-
-                    lineas.forEach(linea => {
-                        try {
-                            let obj = JSON.parse(linea);
-                            if (obj.message && obj.message.includes('___')) {
-                                let partes = obj.message.split('___');
-                                let cod = partes[0];
-                                let fech = partes[1];
-                                let idUnique = partes[2] || (cod + "_" + fech);
-
-                                // FILTRAR SI YA FUE ELIMINADO EN LA PC
-                                if (!reportesBorradosLocal.has(idUnique)) {
-                                    listaNuevos.unshift({
-                                        id: idUnique,
-                                        codigo: cod,
-                                        fechaHora: fech
-                                    });
-                                }
-                            }
-                        } catch(e) {}
-                    });
-
-                    reportesAlertas = listaNuevos;
-                }
-
-                if (document.getElementById('modal-admin').style.display === 'flex') {
-                    actualizarListaAlertasAdmin();
-                }
-            })
-            .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -573,7 +584,6 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
-            sincronizarLecturaNube();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -608,7 +618,6 @@
         }
     }
 
-    /* GUARDA EL ID EN REGISTRO NEGRO PARA QUE LA NUBE NO LO VUELVA A PINTAR */
     function eliminarAlertaIndividual(index) {
         let elem = reportesAlertas[index];
         if (elem && elem.id) {
@@ -627,6 +636,12 @@
         });
         localStorage.setItem('promart_borrados_pc', JSON.stringify(Array.from(reportesBorradosLocal)));
         reportesAlertas = [];
+
+        pubnub.publish({
+            channel: 'promart_almacen_live_channel',
+            message: { tipo: "LIMPIAR_TODO" }
+        });
+
         actualizarListaAlertasAdmin();
     }
 
