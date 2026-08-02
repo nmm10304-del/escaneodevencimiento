@@ -236,7 +236,7 @@
             background: white;
             padding: 20px;
             border-radius: 8px;
-            max-width: 400px;
+            max-width: 420px;
             width: 90%;
             text-align: left;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -247,8 +247,9 @@
             cursor: pointer;
             font-weight: bold;
         }
+        /* PERMITE MOSTRAR HASTA 10 ALERTAS CON SCROLL */
         .lista-reportes {
-            max-height: 200px;
+            max-height: 320px;
             overflow-y: auto;
             background: #f8f9fa;
             border: 1px solid #ccc;
@@ -261,7 +262,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 6px 0;
+            padding: 8px 0;
             border-bottom: 1px solid #e9ecef;
         }
         .item-alerta:last-child { border-bottom: none; }
@@ -269,7 +270,7 @@
             color: #dc3545;
             font-weight: bold;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 18px;
             padding: 0 8px;
             user-select: none;
         }
@@ -378,8 +379,8 @@
     let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
+    let reportesBorradosLocal = new Set(); // SET DE BORRADOS PERMANENTES EN PC
 
-    // CANAL DIRECTO DE COMUNICACIÓN UNIVERSAL (SIN NINGÚN TIPO DE BLOQUEO CORS)
     const CANAL_NUBE = "https://ntfy.sh/promart_reportes_almacen_general_2026";
 
     function bloquearLetras(e) {
@@ -405,6 +406,12 @@
         return String(codigo).replace(/\D/g, '').trim();
     }
 
+    function ocultarTecladoMovil() {
+        if (document.activeElement) {
+            document.activeElement.blur();
+        }
+    }
+
     function mostrarModalInfo(titulo, texto) {
         document.getElementById('modal-info-titulo').innerText = titulo;
         document.getElementById('modal-info-texto').innerText = texto;
@@ -418,6 +425,7 @@
     function inicializarSistemaEstatico() {
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
+        let borradosGuardados = localStorage.getItem('promart_borrados_pc');
 
         if (cacheGuardada) {
             try {
@@ -428,10 +436,13 @@
             } catch(e) {}
         }
 
+        if (borradosGuardados) {
+            try { reportesBorradosLocal = new Set(JSON.parse(borradosGuardados)); } catch(e){}
+        }
+
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Consulta en vivo continua cada 1 segundo sin bloquear
         sincronizarLecturaNube();
         setInterval(sincronizarLecturaNube, 1000);
     }
@@ -472,7 +483,7 @@
         });
     }
 
-    /* REPORTE QUE GATILLA AL INSTANTE DESDE CUALQUIER CELULAR */
+    /* REPORTE EN TIEMPO REAL CON ID ÚNICO DE TRANSMISIÓN */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -480,16 +491,18 @@
             return;
         }
 
+        ocultarTecladoMovil();
+
         let ahora = new Date();
         let dia = String(ahora.getDate()).padStart(2, '0');
         let mes = String(ahora.getMonth() + 1).padStart(2, '0');
         let hora = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
+        let stampId = Date.now();
 
-        // Construir mensaje simple en formato texto
-        let mensaje = `${valInput}___${fechaHoraCompleta}`;
+        // Enviar con ID único de marca temporal
+        let mensaje = `${valInput}___${fechaHoraCompleta}___${stampId}`;
 
-        // Disparo por método Form-Data/Fetch directo (no bloqueable por navegadores móviles)
         fetch(CANAL_NUBE, {
             method: 'POST',
             body: mensaje
@@ -501,7 +514,7 @@
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* LECTURA EN TIEMPO REAL DESDE LA PC */
+    /* LECTURA EN TIEMPO REAL CON FILTRADO DE BORRADOS Y SIN LÍMITE DE CAPACIDAD */
     function sincronizarLecturaNube() {
         fetch(`${CANAL_NUBE}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
@@ -515,10 +528,18 @@
                             let obj = JSON.parse(linea);
                             if (obj.message && obj.message.includes('___')) {
                                 let partes = obj.message.split('___');
-                                listaNuevos.unshift({
-                                    codigo: partes[0],
-                                    fechaHora: partes[1]
-                                });
+                                let cod = partes[0];
+                                let fech = partes[1];
+                                let idUnique = partes[2] || (cod + "_" + fech);
+
+                                // FILTRAR SI YA FUE ELIMINADO EN LA PC
+                                if (!reportesBorradosLocal.has(idUnique)) {
+                                    listaNuevos.unshift({
+                                        id: idUnique,
+                                        codigo: cod,
+                                        fechaHora: fech
+                                    });
+                                }
                             }
                         } catch(e) {}
                     });
@@ -587,18 +608,31 @@
         }
     }
 
+    /* GUARDA EL ID EN REGISTRO NEGRO PARA QUE LA NUBE NO LO VUELVA A PINTAR */
     function eliminarAlertaIndividual(index) {
+        let elem = reportesAlertas[index];
+        if (elem && elem.id) {
+            reportesBorradosLocal.add(elem.id);
+            localStorage.setItem('promart_borrados_pc', JSON.stringify(Array.from(reportesBorradosLocal)));
+        }
         reportesAlertas.splice(index, 1);
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
+        reportesAlertas.forEach(elem => {
+            if (elem && elem.id) {
+                reportesBorradosLocal.add(elem.id);
+            }
+        });
+        localStorage.setItem('promart_borrados_pc', JSON.stringify(Array.from(reportesBorradosLocal)));
         reportesAlertas = [];
         actualizarListaAlertasAdmin();
     }
 
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
+            ocultarTecladoMovil();
             procesarBusquedaManual();
         }
     });
@@ -696,8 +730,8 @@
         inputsJul.forEach(input => {
             input.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter' || e.keyCode === 13) {
+                    ocultarTecladoMovil();
                     convertirFechaJulianaCompleta();
-                    this.blur();
                 }
             });
 
@@ -739,6 +773,8 @@
     }
 
     function procesarBusquedaManual() {
+        ocultarTecladoMovil();
+
         let inputElem = document.getElementById('input-escaneo');
         let lecturaIngresada = inputElem.value.trim();
         
@@ -818,7 +854,6 @@
         }
 
         inputElem.value = "";
-        inputElem.focus();
     }
 
     function esBisiesto(anio) {
