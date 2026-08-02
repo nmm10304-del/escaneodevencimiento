@@ -379,8 +379,8 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // URL DEL MICRO-BACKEND ANTI-CORS
-    const BASE_DB_URL = "https://kvdb.io/RQ3aHwE1TWeP1fWXYXnF9E/alertas_promart";
+    // CANAL DIRECTO DE COMUNICACIÓN UNIVERSAL (SIN NINGÚN TIPO DE BLOQUEO CORS)
+    const CANAL_NUBE = "https://ntfy.sh/promart_reportes_almacen_general_2026";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -431,9 +431,9 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Consulta en vivo constante (500 ms)
+        // Consulta en vivo continua cada 1 segundo sin bloquear
         sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 500);
+        setInterval(sincronizarLecturaNube, 1000);
     }
 
     function cargarArchivosBase() {
@@ -472,7 +472,7 @@
         });
     }
 
-    /* ENVIAR ALERTA: METODO SEGURO ANTI-CORS */
+    /* REPORTE QUE GATILLA AL INSTANTE DESDE CUALQUIER CELULAR */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -486,43 +486,46 @@
         let hora = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
 
-        let nuevoItem = {
-            codigo: valInput,
-            fechaHora: fechaHoraCompleta,
-            id: Date.now()
-        };
+        // Construir mensaje simple en formato texto
+        let mensaje = `${valInput}___${fechaHoraCompleta}`;
 
-        // Bajar historial actual, sumarle el nuevo, y volver a subir
-        fetch(BASE_DB_URL)
-            .then(res => res.ok ? res.json() : [])
-            .then(data => {
-                let lista = Array.isArray(data) ? data : [];
-                lista.unshift(nuevoItem);
-                
-                return fetch(BASE_DB_URL, {
-                    method: 'POST', // POST nativo libre
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(lista)
-                });
-            })
-            .catch(() => {
-                // Modo respaldo en caso de error de red
-                reportesAlertas.unshift(nuevoItem);
-            });
+        // Disparo por método Form-Data/Fetch directo (no bloqueable por navegadores móviles)
+        fetch(CANAL_NUBE, {
+            method: 'POST',
+            body: mensaje
+        }).then(() => {
+            sincronizarLecturaNube();
+        }).catch(() => {});
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* LEER ALERTAS DESDE LA NUBE AL INSTANTE */
+    /* LECTURA EN TIEMPO REAL DESDE LA PC */
     function sincronizarLecturaNube() {
-        fetch(BASE_DB_URL + '?t=' + Date.now())
-            .then(res => res.ok ? res.json() : [])
-            .then(data => {
-                if (Array.isArray(data)) {
-                    reportesAlertas = data;
+        fetch(`${CANAL_NUBE}/json?poll=1`)
+            .then(res => res.ok ? res.text() : "")
+            .then(textoBruto => {
+                if (textoBruto) {
+                    let lineas = textoBruto.trim().split('\n');
+                    let listaNuevos = [];
+
+                    lineas.forEach(linea => {
+                        try {
+                            let obj = JSON.parse(linea);
+                            if (obj.message && obj.message.includes('___')) {
+                                let partes = obj.message.split('___');
+                                listaNuevos.unshift({
+                                    codigo: partes[0],
+                                    fechaHora: partes[1]
+                                });
+                            }
+                        } catch(e) {}
+                    });
+
+                    reportesAlertas = listaNuevos;
                 }
-                
+
                 if (document.getElementById('modal-admin').style.display === 'flex') {
                     actualizarListaAlertasAdmin();
                 }
@@ -586,25 +589,11 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        
-        fetch(BASE_DB_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(reportesAlertas)
-        });
-
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        
-        fetch(BASE_DB_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify([])
-        });
-
         actualizarListaAlertasAdmin();
     }
 
