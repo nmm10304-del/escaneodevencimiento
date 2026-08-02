@@ -381,7 +381,6 @@
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
 
-    // CONEXIÓN DIRECTA POR WEBSOCKETS PUROS PUBNUB (LIBRE DE CORS EN MÓVILES)
     const pubnub = new PubNub({
         publishKey: "pub-c-9d62d3a3-7bf1-4be3-b778-9e5871b96232",
         subscribeKey: "sub-c-4e8c187c-3f9b-4e12-a1b9-38b9393a5222",
@@ -476,10 +475,9 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Cargar historial reciente de la nube
         pubnub.fetchMessages({
             channels: ['promart_almacen_live_channel'],
-            count: 20
+            count: 30
         }, function(status, response) {
             if (response && response.channels && response.channels['promart_almacen_live_channel']) {
                 let msgs = response.channels['promart_almacen_live_channel'];
@@ -532,7 +530,6 @@
         });
     }
 
-    /* REPORTE WEBSOCKET DIRECTO SIN CUALQUIER TIPO DE BLOQUEO */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -890,7 +887,6 @@
 
         let nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-        // CÁLCULO FECHA IMPRESA EN PRODUCTO
         if (mesProdInput !== "" && anioProdInput !== "") {
             let mesInt = parseInt(mesProdInput);
             let anioInt = parseInt(anioProdInput);
@@ -923,7 +919,6 @@
             }
         }
 
-        // CÁLCULO FECHA JULIANA
         if (anioInput !== "" && julianoInput !== "") {
             let anio = parseInt(anioInput.replace(/\D/g,''));
             let juliano = parseInt(julianoInput.replace(/\D/g,''));
