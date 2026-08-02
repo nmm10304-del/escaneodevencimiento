@@ -379,8 +379,8 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
 
-    // URL DE RELEVO PÚBLICO LIBRE DE CORS (BASADO EN FORM-URLENCODED)
-    const SYNC_ENDPOINT = "https://httpbin.org/post";
+    // URL DEL MICRO-BACKEND ANTI-CORS
+    const BASE_DB_URL = "https://kvdb.io/RQ3aHwE1TWeP1fWXYXnF9E/alertas_promart";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -418,7 +418,6 @@
     function inicializarSistemaEstatico() {
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
-        let localGuardado = localStorage.getItem('promart_reportes_maestro');
 
         if (cacheGuardada) {
             try {
@@ -429,15 +428,12 @@
             } catch(e) {}
         }
 
-        if (localGuardado) {
-            try { reportesAlertas = JSON.parse(localGuardado) || []; } catch(e){}
-        }
-
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
+        // Consulta en vivo constante (500 ms)
         sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 1500);
+        setInterval(sincronizarLecturaNube, 500);
     }
 
     function cargarArchivosBase() {
@@ -476,7 +472,7 @@
         });
     }
 
-    /* REPORTE ULTRA SEGURO DESDE EL CELULAR */
+    /* ENVIAR ALERTA: METODO SEGURO ANTI-CORS */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -490,46 +486,48 @@
         let hora = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
 
-        // Obtener historial actual del navegador móvil
-        let localActual = localStorage.getItem('promart_reportes_maestro');
-        if (localActual) {
-            try { reportesAlertas = JSON.parse(localActual) || []; } catch(e){}
-        }
-
-        reportesAlertas.unshift({
+        let nuevoItem = {
             codigo: valInput,
-            fechaHora: fechaHoraCompleta
-        });
+            fechaHora: fechaHoraCompleta,
+            id: Date.now()
+        };
 
-        // Guardar localmente de inmediato para asegurar persistencia móvil
-        localStorage.setItem('promart_reportes_maestro', JSON.stringify(reportesAlertas));
-
-        // Enviar a la nube de respaldo universal con modo no-cors (evita bloqueos en Android/iOS)
-        fetch(SYNC_ENDPOINT, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(reportesAlertas)
-        }).catch(() => {});
+        // Bajar historial actual, sumarle el nuevo, y volver a subir
+        fetch(BASE_DB_URL)
+            .then(res => res.ok ? res.json() : [])
+            .then(data => {
+                let lista = Array.isArray(data) ? data : [];
+                lista.unshift(nuevoItem);
+                
+                return fetch(BASE_DB_URL, {
+                    method: 'POST', // POST nativo libre
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(lista)
+                });
+            })
+            .catch(() => {
+                // Modo respaldo en caso de error de red
+                reportesAlertas.unshift(nuevoItem);
+            });
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
     }
 
+    /* LEER ALERTAS DESDE LA NUBE AL INSTANTE */
     function sincronizarLecturaNube() {
-        let localActual = localStorage.getItem('promart_reportes_maestro');
-        if (localActual) {
-            try {
-                let parsed = JSON.parse(localActual);
-                if (Array.isArray(parsed)) {
-                    reportesAlertas = parsed;
+        fetch(BASE_DB_URL + '?t=' + Date.now())
+            .then(res => res.ok ? res.json() : [])
+            .then(data => {
+                if (Array.isArray(data)) {
+                    reportesAlertas = data;
                 }
-            } catch(e){}
-        }
-
-        if (document.getElementById('modal-admin').style.display === 'flex') {
-            actualizarListaAlertasAdmin();
-        }
+                
+                if (document.getElementById('modal-admin').style.display === 'flex') {
+                    actualizarListaAlertasAdmin();
+                }
+            })
+            .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -588,13 +586,25 @@
 
     function eliminarAlertaIndividual(index) {
         reportesAlertas.splice(index, 1);
-        localStorage.setItem('promart_reportes_maestro', JSON.stringify(reportesAlertas));
+        
+        fetch(BASE_DB_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reportesAlertas)
+        });
+
         actualizarListaAlertasAdmin();
     }
 
     function limpiarAlertasAdmin() {
         reportesAlertas = [];
-        localStorage.removeItem('promart_reportes_maestro');
+        
+        fetch(BASE_DB_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify([])
+        });
+
         actualizarListaAlertasAdmin();
     }
 
