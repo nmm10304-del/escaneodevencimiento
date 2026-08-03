@@ -494,6 +494,7 @@
         });
     }
 
+    /* CARGA MULTI-FORMATO DE ARCHIVOS JSON */
     function cargarArchivosBase() {
         let peticiones = [];
         for (let i = 1; i <= 50; i++) {
@@ -509,18 +510,28 @@
             listas.forEach(lista => {
                 if (lista && Array.isArray(lista)) {
                     lista.forEach(item => {
-                        let skuVal = item["SKU"] || item["sku"] || item["Articulo"] || "";
-                        let eanVal = item["EAN"] || item["ean"] || item["Código de barras"] || "";
-                        let descVal = item["DESCRIPCIÓN"] || item["DESCRIPCION"] || item["Descripción"] || "";
+                        let skuVal = item["SKU"] || item["sku"] || item["Articulo"] || item["ARTICULO"] || "";
+                        let eanVal = item["EAN"] || item["ean"] || item["Código de barras"] || item["CODIGO"] || "";
+                        let descVal = item["DESCRIPCIÓN"] || item["DESCRIPCION"] || item["Descripción"] || item["descripcion"] || "";
+                        
+                        // BÚSQUEDA FLEXIBLE DE VIDA ÚTIL
+                        let vidaVal = item["VIDA UTIL"] || item["VIDA ÚTIL"] || item["vidaUtil"] || item["vida_util"] || item["Vida Util"] || item["VIDA_UTIL"] || "0";
 
                         let skuLimpio = limpiarCodigo(skuVal);
                         let eanLimpio = limpiarCodigo(eanVal);
 
+                        if (skuLimpio) {
+                            maestroSkuMap[skuLimpio] = {
+                                descripcion: descVal,
+                                vidaUtil: vidaVal
+                            };
+                        }
+
                         if (eanLimpio && skuLimpio) {
-                            eanASkuMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal };
+                            eanASkuMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal, vidaUtil: vidaVal };
                             let eanSinCeros = eanLimpio.replace(/^0+/, '');
                             if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
-                                eanASkuMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal };
+                                eanASkuMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal, vidaUtil: vidaVal };
                             }
                         }
                     });
@@ -784,6 +795,7 @@
         }
     }
 
+    /* BÚSQUEDA Y EXTRACCIÓN FLEXIBLE DE VIDA ÚTIL */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
@@ -800,11 +812,13 @@
         if (eanASkuMap[codigoLimpio]) {
             skuFinal = eanASkuMap[codigoLimpio].sku;
             descripcionFinal = eanASkuMap[codigoLimpio].descripcion;
+            vidaUtilFinal = eanASkuMap[codigoLimpio].vidaUtil || "0";
         } else {
             let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
             if (eanASkuMap[codigoSinCeros]) {
                 skuFinal = eanASkuMap[codigoSinCeros].sku;
                 descripcionFinal = eanASkuMap[codigoSinCeros].descripcion;
+                vidaUtilFinal = eanASkuMap[codigoSinCeros].vidaUtil || "0";
             }
         }
 
@@ -818,7 +832,9 @@
             if (infoMaestra.descripcion && infoMaestra.descripcion !== "Sin descripción") {
                 descripcionFinal = infoMaestra.descripcion;
             }
-            vidaUtilFinal = infoMaestra.vidaUtil;
+            if (infoMaestra.vidaUtil) {
+                vidaUtilFinal = infoMaestra.vidaUtil;
+            }
         }
 
         if (infoMaestra || descripcionFinal) {
