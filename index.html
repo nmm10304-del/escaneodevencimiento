@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asistente de Almacén - Promart</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.2.2.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -381,39 +380,7 @@
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
 
-    const pubnub = new PubNub({
-        publishKey: "pub-c-9d62d3a3-7bf1-4be3-b778-9e5871b96232",
-        subscribeKey: "sub-c-4e8c187c-3f9b-4e12-a1b9-38b9393a5222",
-        userId: "promart_usr_" + Math.random().toString(36).substring(2, 7)
-    });
-
-    pubnub.addListener({
-        message: function(event) {
-            if (event && event.message) {
-                let msg = event.message;
-                if (msg.tipo === "ALERTA") {
-                    if (!reportesBorradosLocal.has(msg.id)) {
-                        let existe = reportesAlertas.some(item => item.id === msg.id);
-                        if (!existe) {
-                            reportesAlertas.unshift(msg);
-                            if (document.getElementById('modal-admin').style.display === 'flex') {
-                                actualizarListaAlertasAdmin();
-                            }
-                        }
-                    }
-                } else if (msg.tipo === "LIMPIAR_TODO") {
-                    reportesAlertas = [];
-                    if (document.getElementById('modal-admin').style.display === 'flex') {
-                        actualizarListaAlertasAdmin();
-                    }
-                }
-            }
-        }
-    });
-
-    pubnub.subscribe({
-        channels: ['promart_almacen_live_channel']
-    });
+    const CANAL_NUBE = "https://ntfy.sh/promart_almacen_alertas_canal_2026";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -475,26 +442,10 @@
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        pubnub.fetchMessages({
-            channels: ['promart_almacen_live_channel'],
-            count: 30
-        }, function(status, response) {
-            if (response && response.channels && response.channels['promart_almacen_live_channel']) {
-                let msgs = response.channels['promart_almacen_live_channel'];
-                let acumulados = [];
-                msgs.forEach(m => {
-                    if (m.message && m.message.tipo === "ALERTA") {
-                        if (!reportesBorradosLocal.has(m.message.id)) {
-                            acumulados.unshift(m.message);
-                        }
-                    }
-                });
-                reportesAlertas = acumulados;
-            }
-        });
+        sincronizarLecturaNube();
+        setInterval(sincronizarLecturaNube, 1000);
     }
 
-    /* CARGA MULTI-FORMATO DE ARCHIVOS JSON */
     function cargarArchivosBase() {
         let peticiones = [];
         for (let i = 1; i <= 50; i++) {
@@ -513,8 +464,6 @@
                         let skuVal = item["SKU"] || item["sku"] || item["Articulo"] || item["ARTICULO"] || "";
                         let eanVal = item["EAN"] || item["ean"] || item["Código de barras"] || item["CODIGO"] || "";
                         let descVal = item["DESCRIPCIÓN"] || item["DESCRIPCION"] || item["Descripción"] || item["descripcion"] || "";
-                        
-                        // BÚSQUEDA FLEXIBLE DE VIDA ÚTIL
                         let vidaVal = item["VIDA UTIL"] || item["VIDA ÚTIL"] || item["vidaUtil"] || item["vida_util"] || item["Vida Util"] || item["VIDA_UTIL"] || "0";
 
                         let skuLimpio = limpiarCodigo(skuVal);
@@ -555,22 +504,57 @@
         let mes = String(ahora.getMonth() + 1).padStart(2, '0');
         let hora = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
-        let stampId = Date.now() + "_" + Math.random().toString(36).substring(2, 6);
+        let stampId = Date.now();
 
-        let payload = {
-            tipo: "ALERTA",
-            id: stampId,
-            codigo: valInput,
-            fechaHora: fechaHoraCompleta
-        };
+        let mensaje = `${valInput}___${fechaHoraCompleta}___${stampId}`;
 
-        pubnub.publish({
-            channel: 'promart_almacen_live_channel',
-            message: payload
-        });
+        fetch(CANAL_NUBE, {
+            method: 'POST',
+            body: mensaje
+        }).then(() => {
+            sincronizarLecturaNube();
+        }).catch(() => {});
 
         mostrarModalInfo("Atención", "Alerta enviada al administrador.");
         document.getElementById('input-escaneo').value = "";
+    }
+
+    function sincronizarLecturaNube() {
+        fetch(`${CANAL_NUBE}/json?poll=1`)
+            .then(res => res.ok ? res.text() : "")
+            .then(textoBruto => {
+                if (textoBruto) {
+                    let lineas = textoBruto.trim().split('\n');
+                    let listaNuevos = [];
+
+                    lineas.forEach(linea => {
+                        try {
+                            let obj = JSON.parse(linea);
+                            if (obj.message && obj.message.includes('___')) {
+                                let partes = obj.message.split('___');
+                                let cod = partes[0];
+                                let fech = partes[1];
+                                let idUnique = partes[2] || (cod + "_" + fech);
+
+                                if (!reportesBorradosLocal.has(idUnique)) {
+                                    listaNuevos.unshift({
+                                        id: idUnique,
+                                        codigo: cod,
+                                        fechaHora: fech
+                                    });
+                                }
+                            }
+                        } catch(e) {}
+                    });
+
+                    reportesAlertas = listaNuevos;
+                }
+
+                if (document.getElementById('modal-admin').style.display === 'flex') {
+                    actualizarListaAlertasAdmin();
+                }
+            })
+            .catch(() => {});
     }
 
     function solicitarClaveSoloDesdePC() {
@@ -592,6 +576,7 @@
         let clave = document.getElementById('input-clave-admin').value;
         if (clave === "admin123") {
             cerrarModalClave();
+            sincronizarLecturaNube();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
         } else {
@@ -644,12 +629,6 @@
         });
         localStorage.setItem('promart_borrados_pc', JSON.stringify(Array.from(reportesBorradosLocal)));
         reportesAlertas = [];
-
-        pubnub.publish({
-            channel: 'promart_almacen_live_channel',
-            message: { tipo: "LIMPIAR_TODO" }
-        });
-
         actualizarListaAlertasAdmin();
     }
 
@@ -795,7 +774,6 @@
         }
     }
 
-    /* BÚSQUEDA Y EXTRACCIÓN FLEXIBLE DE VIDA ÚTIL */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
