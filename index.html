@@ -374,8 +374,10 @@
 </div>
 
 <script>
-    let eanASkuMap = {};          
-    let fvMaestroMap = {};        
+    let eanMap = {};               // EAN -> { sku, descripcion }
+    let skuDescMap = {};          // SKU -> descripcion
+    let fvVidaUtilMap = {};       // SKU -> vidaUtil (Extraído de FV.json)
+    
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
@@ -440,7 +442,6 @@
         setInterval(sincronizarLecturaNube, 1200);
     }
 
-    /* LECTURA ESPECÍFICA PARA LA CLAVE "DESCRIPCION" */
     function obtenerValorObjeto(obj, listaClaves) {
         if (!obj) return "";
         let llavesObjeto = Object.keys(obj);
@@ -468,16 +469,18 @@
         return "";
     }
 
-    /* MAPEO DIRECTO BUSCANDO "DESCRIPCION" EN TODOS LOS JSON */
+    /* CARGA DE ARCHIVOS SEPARADA Y ORDENADA */
     function cargarArchivosBase() {
         let peticiones = [];
 
+        // 1. Cargar FV.json para extraer ÚNICAMENTE la VIDA ÚTIL por SKU
         peticiones.push(
             fetch(`FV.json`)
             .then(res => res.ok ? res.json() : null)
             .catch(() => null)
         );
 
+        // 2. Cargar 01.json a 50.json para extraer SKU, EAN y DESCRIPCION
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
@@ -490,25 +493,21 @@
         Promise.all(peticiones).then(listas => {
             let fvLista = listas[0];
             
-            // 1. CARGAR MAPA DESDE FV.json
+            // A) GUARDAR VIDA ÚTIL DESDE FV.json
             if (fvLista && Array.isArray(fvLista)) {
                 fvLista.forEach(item => {
                     let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
-                    let descVal = obtenerValorObjeto(item, ["DESCRIPCION", "DESCRIPCIÓN", "descripcion", "Descripción", "DESCRIPCION_LARGA"]);
                     let vidaVal = buscarVidaUtilEnObjeto(item);
 
                     let skuLimpio = limpiarCodigo(skuVal);
-                    if (skuLimpio) {
-                        fvMaestroMap[skuLimpio] = {
-                            descripcion: descVal,
-                            vidaUtil: vidaVal
-                        };
+                    if (skuLimpio && vidaVal) {
+                        fvVidaUtilMap[skuLimpio] = vidaVal;
                     }
                 });
-                document.getElementById('txt-status').innerText = `✅ Base FV activa (${Object.keys(fvMaestroMap).length} artículos)`;
+                document.getElementById('txt-status').innerText = `✅ Base FV activa (${Object.keys(fvVidaUtilMap).length} registros)`;
             }
 
-            // 2. CRUZAR ARCHIVOS 01 AL 50.json (EXTRAER EAN Y DESCRIPCION DIRECTA)
+            // B) GUARDAR EAN, SKU Y DESCRIPCIÓN DESDE 01-50.json
             for (let i = 1; i < listas.length; i++) {
                 let lista = listas[i];
                 if (lista && Array.isArray(lista)) {
@@ -516,27 +515,19 @@
                         let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
                         let eanVal = obtenerValorObjeto(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
                         let descVal = obtenerValorObjeto(item, ["DESCRIPCION", "DESCRIPCIÓN", "descripcion", "Descripción"]);
-                        let vidaVal = buscarVidaUtilEnObjeto(item);
 
                         let skuLimpio = limpiarCodigo(skuVal);
                         let eanLimpio = limpiarCodigo(eanVal);
 
-                        if (skuLimpio) {
-                            if (!fvMaestroMap[skuLimpio]) {
-                                fvMaestroMap[skuLimpio] = { descripcion: descVal, vidaUtil: vidaVal };
-                            } else {
-                                // Si FV.json no traía descripción, asignarle la de 01..50.json
-                                if (!fvMaestroMap[skuLimpio].descripcion && descVal) {
-                                    fvMaestroMap[skuLimpio].descripcion = descVal;
-                                }
-                            }
+                        if (skuLimpio && descVal) {
+                            skuDescMap[skuLimpio] = descVal;
                         }
 
                         if (eanLimpio && skuLimpio) {
-                            eanASkuMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal };
+                            eanMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal };
                             let eanSinCeros = eanLimpio.replace(/^0+/, '');
                             if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
-                                eanASkuMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal };
+                                eanMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal };
                             }
                         }
                     });
@@ -840,7 +831,7 @@
         }
     }
 
-    /* BÚSQUEDA Y CRUCE GARANTIZADO DE DESCRIPCIÓN */
+    /* BÚSQUEDA SECUENCIAL SEGÚN TUS 3 REGLAS */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
@@ -854,35 +845,34 @@
         let descripcionFinal = "";
         let vidaUtilFinal = "";
 
-        if (eanASkuMap[codigoLimpio]) {
-            skuFinal = eanASkuMap[codigoLimpio].sku;
-            descripcionFinal = eanASkuMap[codigoLimpio].descripcion || "";
+        // REGLA 1 & 2: SI ESCANEÓ EAN, EXTRAER SU SKU Y SU DESCRIPCIÓN DESDE 01..50.json
+        if (eanMap[codigoLimpio]) {
+            skuFinal = eanMap[codigoLimpio].sku;
+            descripcionFinal = eanMap[codigoLimpio].descripcion || "";
         } else {
             let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
-            if (eanASkuMap[codigoSinCeros]) {
-                skuFinal = eanASkuMap[codigoSinCeros].sku;
-                descripcionFinal = eanASkuMap[codigoSinCeros].descripcion || "";
+            if (eanMap[codigoSinCeros]) {
+                skuFinal = eanMap[codigoSinCeros].sku;
+                descripcionFinal = eanMap[codigoSinCeros].descripcion || "";
             }
         }
 
+        // SI NO ES EAN O NO ESTÁ EN EL MAPA, ASUMIMOS QUE DIGITÓ EL SKU DIRECTAMENTE
         if (!skuFinal) {
             skuFinal = codigoLimpio;
         }
 
-        let infoMaestra = fvMaestroMap[skuFinal] || fvMaestroMap[skuFinal.replace(/^0+/, '')];
-
-        if (infoMaestra) {
-            if (infoMaestra.vidaUtil) {
-                vidaUtilFinal = infoMaestra.vidaUtil;
-            }
-            if (!descripcionFinal && infoMaestra.descripcion) {
-                descripcionFinal = infoMaestra.descripcion;
-            }
+        // OBTENER DESCRIPCIÓN POR SKU SI NO SE ENCONTRÓ VÍA EAN
+        if (!descripcionFinal) {
+            descripcionFinal = skuDescMap[skuFinal] || skuDescMap[skuFinal.replace(/^0+/, '')] || "";
         }
+
+        // REGLA 3: BUSCAR LA VIDA ÚTIL EXCLUSIVAMENTE EN FV.json
+        vidaUtilFinal = fvVidaUtilMap[skuFinal] || fvVidaUtilMap[skuFinal.replace(/^0+/, '')] || "";
 
         limpiarCalculadoraManual();
 
-        if (infoMaestra || descripcionFinal) {
+        if (descripcionFinal || vidaUtilFinal) {
             document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${descripcionFinal || "Sin descripción"}`;
             document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${skuFinal}`;
 
