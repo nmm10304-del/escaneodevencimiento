@@ -374,15 +374,14 @@
 </div>
 
 <script>
-    let eanMap = {};               // EAN -> { sku, descripcion }
-    let skuDescMap = {};          // SKU -> descripcion
-    let fvVidaUtilMap = {};       // SKU -> vidaUtil (Extraído de FV.json)
-    
+    let eanASkuMap = {};       
+    let maestroSkuMap = {};    
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
 
-    const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_canal_v2026";
+    // CANAL DE RELEVOS NATIVO ULTRA-RÁPIDO EN TIEMPO REAL
+    const CANAL_TRANSMISION = "https://ntfy.sh/promart_almacen_alertas_canal_2026";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -424,24 +423,32 @@
     }
 
     function inicializarSistemaEstatico() {
+        let cacheGuardada = localStorage.getItem('promart_maestro_json');
+        let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
         let borradosGuardados = localStorage.getItem('promart_borrados_pc');
-        let alertasLocales = localStorage.getItem('promart_alertas_locales');
+
+        if (cacheGuardada) {
+            try {
+                maestroSkuMap = JSON.parse(cacheGuardada);
+                if (horaGuardada) {
+                    document.getElementById('txt-status').innerText = `✅ Base FV activa (${horaGuardada})`;
+                }
+            } catch(e) {}
+        }
 
         if (borradosGuardados) {
             try { reportesBorradosLocal = new Set(JSON.parse(borradosGuardados)); } catch(e){}
         }
 
-        if (alertasLocales) {
-            try { reportesAlertas = JSON.parse(alertasLocales); } catch(e){}
-        }
-
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
+        // Escucha en vivo continua sin cortes
         sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 1200);
+        setInterval(sincronizarLecturaNube, 1000);
     }
 
+    /* OBTENER PROPIEDAD FLEXIBLE DE ARCHIVOS JSON */
     function obtenerValorObjeto(obj, listaClaves) {
         if (!obj) return "";
         let llavesObjeto = Object.keys(obj);
@@ -454,33 +461,8 @@
         return "";
     }
 
-    function buscarVidaUtilEnObjeto(obj) {
-        if (!obj || typeof obj !== 'object') return "";
-        let claves = Object.keys(obj);
-        for (let key of claves) {
-            let k = key.trim().toUpperCase();
-            if (k.includes("VIDA") || k.includes("UTIL") || k.includes("MES") || k.includes("FV") || k.includes("VENCIMIENTO")) {
-                let v = String(obj[key]).trim();
-                if (v && v !== "null" && v !== "undefined" && v !== "-") {
-                    return v;
-                }
-            }
-        }
-        return "";
-    }
-
-    /* CARGA DE ARCHIVOS SEPARADA Y ORDENADA */
     function cargarArchivosBase() {
         let peticiones = [];
-
-        // 1. Cargar FV.json para extraer ÚNICAMENTE la VIDA ÚTIL por SKU
-        peticiones.push(
-            fetch(`FV.json`)
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null)
-        );
-
-        // 2. Cargar 01.json a 50.json para extraer SKU, EAN y DESCRIPCION
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
@@ -491,53 +473,39 @@
         }
 
         Promise.all(peticiones).then(listas => {
-            let fvLista = listas[0];
-            
-            // A) GUARDAR VIDA ÚTIL DESDE FV.json
-            if (fvLista && Array.isArray(fvLista)) {
-                fvLista.forEach(item => {
-                    let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
-                    let vidaVal = buscarVidaUtilEnObjeto(item);
-
-                    let skuLimpio = limpiarCodigo(skuVal);
-                    if (skuLimpio && vidaVal) {
-                        fvVidaUtilMap[skuLimpio] = vidaVal;
-                    }
-                });
-                document.getElementById('txt-status').innerText = `✅ Base FV activa (${Object.keys(fvVidaUtilMap).length} registros)`;
-            }
-
-            // B) GUARDAR EAN, SKU Y DESCRIPCIÓN DESDE 01-50.json
-            for (let i = 1; i < listas.length; i++) {
-                let lista = listas[i];
+            listas.forEach(lista => {
                 if (lista && Array.isArray(lista)) {
                     lista.forEach(item => {
                         let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
                         let eanVal = obtenerValorObjeto(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
-                        let descVal = obtenerValorObjeto(item, ["DESCRIPCION", "DESCRIPCIÓN", "descripcion", "Descripción"]);
+                        let descVal = obtenerValorObjeto(item, ["DESCRIPCIÓN", "DESCRIPCION", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
+                        let vidaVal = obtenerValorObjeto(item, ["VIDA UTIL", "VIDA ÚTIL", "vidaUtil", "vida_util", "Vida Util", "VIDA_UTIL", "VIDA", "Vida", "VIDA UTIL (MESES)", "VIDA ÚTIL (MESES)"]);
 
                         let skuLimpio = limpiarCodigo(skuVal);
                         let eanLimpio = limpiarCodigo(eanVal);
 
-                        if (skuLimpio && descVal) {
-                            skuDescMap[skuLimpio] = descVal;
+                        if (skuLimpio) {
+                            maestroSkuMap[skuLimpio] = {
+                                descripcion: descVal,
+                                vidaUtil: vidaVal
+                            };
                         }
 
                         if (eanLimpio && skuLimpio) {
-                            eanMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal };
+                            eanASkuMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal, vidaUtil: vidaVal };
                             let eanSinCeros = eanLimpio.replace(/^0+/, '');
                             if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
-                                eanMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal };
+                                eanASkuMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal, vidaUtil: vidaVal };
                             }
                         }
                     });
                 }
-            }
-
+            });
             document.getElementById('input-escaneo').focus();
         });
     }
 
+    /* REPORTE EN TIEMPO REAL DESDE CUALQUIER MÓVIL/POCKET */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -554,11 +522,11 @@
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
         let stampId = Date.now() + "_" + Math.random().toString(36).substring(2, 6);
 
-        let mensajeData = `${valInput}___${fechaHoraCompleta}___${stampId}`;
+        let mensaje = `${valInput}___${fechaHoraCompleta}___${stampId}`;
 
-        fetch(CANAL_SERVER, {
+        fetch(CANAL_TRANSMISION, {
             method: 'POST',
-            body: mensajeData
+            body: mensaje
         }).then(() => {
             sincronizarLecturaNube();
         }).catch(() => {});
@@ -567,17 +535,14 @@
         document.getElementById('input-escaneo').value = "";
     }
 
+    /* SINCRONIZACIÓN CONTINUA EN PC */
     function sincronizarLecturaNube() {
-        fetch(`${CANAL_SERVER}/json?poll=1`)
+        fetch(`${CANAL_TRANSMISION}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
             .then(textoBruto => {
                 if (textoBruto) {
                     let lineas = textoBruto.trim().split('\n');
-                    let mapaNuevos = new Map();
-
-                    reportesAlertas.forEach(item => {
-                        if (item && item.id) mapaNuevos.set(item.id, item);
-                    });
+                    let listaNuevos = [];
 
                     lineas.forEach(linea => {
                         try {
@@ -589,7 +554,7 @@
                                 let idUnique = partes[2] || (cod + "_" + fech);
 
                                 if (!reportesBorradosLocal.has(idUnique)) {
-                                    mapaNuevos.set(idUnique, {
+                                    listaNuevos.unshift({
                                         id: idUnique,
                                         codigo: cod,
                                         fechaHora: fech
@@ -599,10 +564,7 @@
                         } catch(e) {}
                     });
 
-                    let arrayResultado = Array.from(mapaNuevos.values());
-                    arrayResultado.sort((a,b) => String(b.id).localeCompare(String(a.id)));
-                    reportesAlertas = arrayResultado;
-                    localStorage.setItem('promart_alertas_locales', JSON.stringify(reportesAlertas));
+                    reportesAlertas = listaNuevos;
                 }
 
                 if (document.getElementById('modal-admin').style.display === 'flex') {
@@ -673,7 +635,6 @@
             localStorage.setItem('promart_borrados_pc', JSON.stringify(Array.from(reportesBorradosLocal)));
         }
         reportesAlertas.splice(index, 1);
-        localStorage.setItem('promart_alertas_locales', JSON.stringify(reportesAlertas));
         actualizarListaAlertasAdmin();
     }
 
@@ -685,7 +646,6 @@
         });
         localStorage.setItem('promart_borrados_pc', JSON.stringify(Array.from(reportesBorradosLocal)));
         reportesAlertas = [];
-        localStorage.removeItem('promart_alertas_locales');
         actualizarListaAlertasAdmin();
     }
 
@@ -831,7 +791,7 @@
         }
     }
 
-    /* BÚSQUEDA SECUENCIAL SEGÚN TUS 3 REGLAS */
+    /* BÚSQUEDA Y EXTRACCIÓN PERSISTENTE N VECES */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
@@ -845,34 +805,37 @@
         let descripcionFinal = "";
         let vidaUtilFinal = "";
 
-        // REGLA 1 & 2: SI ESCANEÓ EAN, EXTRAER SU SKU Y SU DESCRIPCIÓN DESDE 01..50.json
-        if (eanMap[codigoLimpio]) {
-            skuFinal = eanMap[codigoLimpio].sku;
-            descripcionFinal = eanMap[codigoLimpio].descripcion || "";
+        if (eanASkuMap[codigoLimpio]) {
+            skuFinal = eanASkuMap[codigoLimpio].sku;
+            descripcionFinal = eanASkuMap[codigoLimpio].descripcion;
+            vidaUtilFinal = eanASkuMap[codigoLimpio].vidaUtil || "";
         } else {
             let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
-            if (eanMap[codigoSinCeros]) {
-                skuFinal = eanMap[codigoSinCeros].sku;
-                descripcionFinal = eanMap[codigoSinCeros].descripcion || "";
+            if (eanASkuMap[codigoSinCeros]) {
+                skuFinal = eanASkuMap[codigoSinCeros].sku;
+                descripcionFinal = eanASkuMap[codigoSinCeros].descripcion;
+                vidaUtilFinal = eanASkuMap[codigoSinCeros].vidaUtil || "";
             }
         }
 
-        // SI NO ES EAN O NO ESTÁ EN EL MAPA, ASUMIMOS QUE DIGITÓ EL SKU DIRECTAMENTE
         if (!skuFinal) {
             skuFinal = codigoLimpio;
         }
 
-        // OBTENER DESCRIPCIÓN POR SKU SI NO SE ENCONTRÓ VÍA EAN
-        if (!descripcionFinal) {
-            descripcionFinal = skuDescMap[skuFinal] || skuDescMap[skuFinal.replace(/^0+/, '')] || "";
-        }
+        let infoMaestra = maestroSkuMap[skuFinal] || maestroSkuMap[skuFinal.replace(/^0+/, '')];
 
-        // REGLA 3: BUSCAR LA VIDA ÚTIL EXCLUSIVAMENTE EN FV.json
-        vidaUtilFinal = fvVidaUtilMap[skuFinal] || fvVidaUtilMap[skuFinal.replace(/^0+/, '')] || "";
+        if (infoMaestra) {
+            if (infoMaestra.descripcion && infoMaestra.descripcion !== "Sin descripción") {
+                descripcionFinal = infoMaestra.descripcion;
+            }
+            if (infoMaestra.vidaUtil) {
+                vidaUtilFinal = infoMaestra.vidaUtil;
+            }
+        }
 
         limpiarCalculadoraManual();
 
-        if (descripcionFinal || vidaUtilFinal) {
+        if (infoMaestra || descripcionFinal) {
             document.getElementById('txt-desc').innerHTML = `<b>Descripción:</b> ${descripcionFinal || "Sin descripción"}`;
             document.getElementById('txt-sku').innerHTML = `<b>SKU:</b> ${skuFinal}`;
 
