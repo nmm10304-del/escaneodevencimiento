@@ -374,14 +374,13 @@
 </div>
 
 <script>
-    let eanASkuMap = {};       
-    let maestroSkuMap = {};    
+    let eanASkuMap = {};          // Mapea EAN -> SKU + Descripción (desde 01.json .. 50.json)
+    let fvMaestroMap = {};        // Mapea SKU -> Vida Útil + Descripción (desde FV.json)
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
 
-    // CANAL DE TRANSMISIÓN NTFY DIRECTO ANTI-CORS CON PERSISTENCIA
-    const CANAL_NTFY = "https://ntfy.sh/promart_almacen_live_2026_realtime";
+    const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_canal_v2026";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -423,19 +422,8 @@
     }
 
     function inicializarSistemaEstatico() {
-        let cacheGuardada = localStorage.getItem('promart_maestro_json');
-        let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
         let borradosGuardados = localStorage.getItem('promart_borrados_pc');
         let alertasLocales = localStorage.getItem('promart_alertas_locales');
-
-        if (cacheGuardada) {
-            try {
-                maestroSkuMap = JSON.parse(cacheGuardada);
-                if (horaGuardada) {
-                    document.getElementById('txt-status').innerText = `✅ Base FV activa (${horaGuardada})`;
-                }
-            } catch(e) {}
-        }
 
         if (borradosGuardados) {
             try { reportesBorradosLocal = new Set(JSON.parse(borradosGuardados)); } catch(e){}
@@ -449,24 +437,7 @@
         configurarEventosJulianosMóviles();
 
         sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 1000);
-    }
-
-    /* BÚSQUEDA EXHAUSTIVA DE CAMPOS EN ARCHIVOS JSON */
-    function buscarVidaUtilEnObjeto(obj) {
-        if (!obj || typeof obj !== 'object') return "";
-        
-        let claves = Object.keys(obj);
-        for (let key of claves) {
-            let keyLimpia = key.trim().toLowerCase();
-            if (keyLimpia.includes("vida") || keyLimpia.includes("util") || keyLimpia.includes("meses") || keyLimpia.includes("mes")) {
-                let val = String(obj[key]).trim();
-                if (val && val !== "undefined" && val !== "null") {
-                    return val;
-                }
-            }
-        }
-        return "";
+        setInterval(sincronizarLecturaNube, 1200);
     }
 
     function obtenerValorObjeto(obj, listaClaves) {
@@ -481,8 +452,33 @@
         return "";
     }
 
+    function buscarVidaUtilEnObjeto(obj) {
+        if (!obj || typeof obj !== 'object') return "";
+        let claves = Object.keys(obj);
+        for (let key of claves) {
+            let k = key.trim().toUpperCase();
+            if (k.includes("VIDA") || k.includes("UTIL") || k.includes("MES") || k.includes("FV") || k.includes("VENCIMIENTO")) {
+                let v = String(obj[key]).trim();
+                if (v && v !== "null" && v !== "undefined" && v !== "-") {
+                    return v;
+                }
+            }
+        }
+        return "";
+    }
+
+    /* CARGA COMBINADA: 1º FV.json (Maestro Vida Útil) y 2º 01-50.json (Equivalencias EAN -> SKU) */
     function cargarArchivosBase() {
         let peticiones = [];
+
+        // Cargar FV.json
+        peticiones.push(
+            fetch(`FV.json`)
+            .then(res => res.ok ? res.json() : null)
+            .catch(() => null)
+        );
+
+        // Cargar 01.json hasta 50.json
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
@@ -493,39 +489,62 @@
         }
 
         Promise.all(peticiones).then(listas => {
-            listas.forEach(lista => {
+            let fvLista = listas[0]; // FV.json es la posición 0
+            
+            // 1. PROCESAR FV.json PARA VINCULAR SKU CON VIDA ÚTIL
+            if (fvLista && Array.isArray(fvLista)) {
+                fvLista.forEach(item => {
+                    let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
+                    let descVal = obtenerValorObjeto(item, ["DESCRIPCIÓN", "DESCRIPCION", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
+                    let vidaVal = buscarVidaUtilEnObjeto(item);
+
+                    let skuLimpio = limpiarCodigo(skuVal);
+                    if (skuLimpio) {
+                        fvMaestroMap[skuLimpio] = {
+                            descripcion: descVal,
+                            vidaUtil: vidaVal
+                        };
+                    }
+                });
+                document.getElementById('txt-status').innerText = `✅ Base FV activa (${Object.keys(fvMaestroMap).length} artículos)`;
+            }
+
+            // 2. PROCESAR ARCHIVOS 01.json A 50.json PARA CRUZAR EAN -> SKU
+            for (let i = 1; i < listas.length; i++) {
+                let lista = listas[i];
                 if (lista && Array.isArray(lista)) {
                     lista.forEach(item => {
                         let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
                         let eanVal = obtenerValorObjeto(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
-                        let descVal = obtenerValorObjeto(item, ["DESCRIPCIÓN", "DESCRIPCION", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
+                        let descVal = obtenerValorObjeto(item, ["DESCRIPCIÓN", "DESCRIPCION", "Descripción", "descripcion"]);
                         let vidaVal = buscarVidaUtilEnObjeto(item);
 
                         let skuLimpio = limpiarCodigo(skuVal);
                         let eanLimpio = limpiarCodigo(eanVal);
 
-                        if (skuLimpio) {
-                            maestroSkuMap[skuLimpio] = {
+                        if (skuLimpio && !fvMaestroMap[skuLimpio]) {
+                            fvMaestroMap[skuLimpio] = {
                                 descripcion: descVal,
                                 vidaUtil: vidaVal
                             };
                         }
 
                         if (eanLimpio && skuLimpio) {
-                            eanASkuMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal, vidaUtil: vidaVal };
+                            eanASkuMap[eanLimpio] = skuLimpio;
                             let eanSinCeros = eanLimpio.replace(/^0+/, '');
                             if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
-                                eanASkuMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal, vidaUtil: vidaVal };
+                                eanASkuMap[eanSinCeros] = skuLimpio;
                             }
                         }
                     });
                 }
-            });
+            }
+
             document.getElementById('input-escaneo').focus();
         });
     }
 
-    /* REPORTE EN TIEMPO REAL DESDE CUALQUIER MÓVIL/POCKET */
+    /* REPORTE EN TIEMPO REAL DESDE CUALQUIER MÓVIL/POCKET A LA PC */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -542,12 +561,11 @@
         let fechaHoraCompleta = `${dia}/${mes} - ${hora}`;
         let stampId = Date.now() + "_" + Math.random().toString(36).substring(2, 6);
 
-        let mensaje = `${valInput}___${fechaHoraCompleta}___${stampId}`;
+        let mensajeData = `${valInput}___${fechaHoraCompleta}___${stampId}`;
 
-        // Enviar evento directo a la nube
-        fetch(CANAL_NTFY, {
+        fetch(CANAL_SERVER, {
             method: 'POST',
-            body: mensaje
+            body: mensajeData
         }).then(() => {
             sincronizarLecturaNube();
         }).catch(() => {});
@@ -556,16 +574,15 @@
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* SINCRONIZACIÓN LECTURA CONTINUA EN PC */
+    /* SINCRONIZACIÓN CONTINUA EN PC */
     function sincronizarLecturaNube() {
-        fetch(`${CANAL_NTFY}/json?poll=1`)
+        fetch(`${CANAL_SERVER}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
             .then(textoBruto => {
                 if (textoBruto) {
                     let lineas = textoBruto.trim().split('\n');
                     let mapaNuevos = new Map();
 
-                    // Cargar existentes
                     reportesAlertas.forEach(item => {
                         if (item && item.id) mapaNuevos.set(item.id, item);
                     });
@@ -822,7 +839,7 @@
         }
     }
 
-    /* BÚSQUEDA ROBUSTA QUE EXTRAE VIDA ÚTIL */
+    /* BÚSQUEDA EXACТA CON FLUJO: EAN -> SKU -> FV.json */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
@@ -836,32 +853,27 @@
         let descripcionFinal = "";
         let vidaUtilFinal = "";
 
+        // 1. SI ES UN EAN, BUSCAR SU SKU EN EL MAPA DE ARCHIVOS (01-50.json)
         if (eanASkuMap[codigoLimpio]) {
-            skuFinal = eanASkuMap[codigoLimpio].sku;
-            descripcionFinal = eanASkuMap[codigoLimpio].descripcion;
-            vidaUtilFinal = eanASkuMap[codigoLimpio].vidaUtil || "";
+            skuFinal = eanASkuMap[codigoLimpio];
         } else {
             let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
             if (eanASkuMap[codigoSinCeros]) {
-                skuFinal = eanASkuMap[codigoSinCeros].sku;
-                descripcionFinal = eanASkuMap[codigoSinCeros].descripcion;
-                vidaUtilFinal = eanASkuMap[codigoSinCeros].vidaUtil || "";
+                skuFinal = eanASkuMap[codigoSinCeros];
             }
         }
 
+        // SI NO ES EAN O NO SE ENCONTRÓ EQUIVALENCIA, ASUMIR QUE INGRESÓ DIRECTAMENTE EL SKU
         if (!skuFinal) {
             skuFinal = codigoLimpio;
         }
 
-        let infoMaestra = maestroSkuMap[skuFinal] || maestroSkuMap[skuFinal.replace(/^0+/, '')];
+        // 2. CON EL SKU FINAL, BUSCAR EN EL MAESTRO DE VIDA ÚTIL (FV.json)
+        let infoMaestra = fvMaestroMap[skuFinal] || fvMaestroMap[skuFinal.replace(/^0+/, '')];
 
         if (infoMaestra) {
-            if (infoMaestra.descripcion && infoMaestra.descripcion !== "Sin descripción") {
-                descripcionFinal = infoMaestra.descripcion;
-            }
-            if (infoMaestra.vidaUtil) {
-                vidaUtilFinal = infoMaestra.vidaUtil;
-            }
+            descripcionFinal = infoMaestra.descripcion || "";
+            vidaUtilFinal = infoMaestra.vidaUtil || "";
         }
 
         limpiarCalculadoraManual();
