@@ -6,6 +6,9 @@
     <title>Asistente de Almacén - Promart</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
+        * {
+            box-sizing: border-box;
+        }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
             background-image: url("https://backendproyecta.proyecta.net.pe/storage/projects/1615255868.jpg");
@@ -14,26 +17,25 @@
             background-repeat: no-repeat;
             background-attachment: fixed;
             margin: 0;
-            padding: 20px;
+            padding: 15px;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            box-sizing: border-box;
         }
         .container {
             max-width: 480px;
             width: 100%;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 25px;
+            background: rgba(255, 255, 255, 0.96);
+            padding: 20px;
             border-radius: 12px;
             box-shadow: 0 6px 20px rgba(0,0,0,0.25);
             text-align: center;
-            box-sizing: border-box;
         }
         
         .logo {
             width: 150px;
+            max-width: 100%;
             display: block;
             margin: 0 auto 15px;
             user-select: none;
@@ -74,7 +76,6 @@
             text-align: center;
             border: 2px solid #333;
             border-radius: 8px;
-            box-sizing: border-box;
             outline: none;
             color: #212529;
             background-color: #f8f9fa;
@@ -157,7 +158,7 @@
         .resaltado { font-weight: bold; color: #28a745; font-size: 18px; }
         .no-registra { font-weight: bold; color: #dc3545; font-size: 16px; }
         .error { color: #dc3545; font-weight: bold; }
-        .info-status { font-size: 13px; color: #28a745; text-align: center; margin-top: 10px; font-weight: bold; }
+        .info-status { font-size: 13px; color: #28a745; text-align: center; margin-top: 10px; font-weight: bold; word-break: break-word; }
 
         .seccion-juliana {
             margin-top: 25px;
@@ -182,7 +183,6 @@
             border-radius: 6px;
             border: 1px solid #ccc;
             font-size: 15px;
-            box-sizing: border-box;
         }
         input:disabled {
             background-color: #e9ecef;
@@ -216,7 +216,6 @@
             border-radius: 6px;
             border: 1px solid #ff6a00;
             text-align: left;
-            box-sizing: border-box;
         }
         .linea-res { font-size: 14px; margin: 5px 0; color: #333; }
         .vence-alerta { font-size: 16px; font-weight: bold; color: #ff6a00; }
@@ -374,8 +373,8 @@
 </div>
 
 <script>
-    let eanASkuMap = {};          // Mapeo EAN -> SKU (desde 01.json .. 50.json)
-    let maestroSkuMap = {};       // Mapeo SKU -> { descripcion, vidaUtil } (desde FV.json y respaldos)
+    let eanASkuMap = {};          
+    let maestroSkuMap = {};       
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
@@ -402,7 +401,7 @@
     }
 
     function limpiarCodigo(codigo) {
-        return String(codigo).replace(/\D/g, '').trim();
+        return String(codigo || '').replace(/\D/g, '').trim();
     }
 
     function ocultarTecladoMovil() {
@@ -440,45 +439,44 @@
         setInterval(sincronizarLecturaNube, 1200);
     }
 
-    function obtenerValorObjeto(obj, listaClaves) {
-        if (!obj) return "";
-        let llavesObjeto = Object.keys(obj);
-        for (let claveDeseada of listaClaves) {
-            let llaveEncontrada = llavesObjeto.find(k => k.trim().toLowerCase() === claveDeseada.toLowerCase());
-            if (llaveEncontrada && obj[llaveEncontrada] !== undefined && obj[llaveEncontrada] !== null) {
-                return String(obj[llaveEncontrada]).trim();
+    /* LECTOR FLEXIBLE DE PROPIEDADES EN OBJETOS JSON */
+    function obtenerPropiedadUniversal(obj, posiblesNombres) {
+        if (!obj || typeof obj !== 'object') return "";
+        let llaves = Object.keys(obj);
+        for (let nombre of posiblesNombres) {
+            let llaveMatch = llaves.find(k => k.trim().toLowerCase() === nombre.toLowerCase());
+            if (llaveMatch && obj[llaveMatch] !== undefined && obj[llaveMatch] !== null) {
+                return String(obj[llaveMatch]).trim();
             }
         }
         return "";
     }
 
-    function buscarVidaUtilEnObjeto(obj) {
+    function buscarVidaUtilGenerica(obj) {
         if (!obj || typeof obj !== 'object') return "";
-        let claves = Object.keys(obj);
-        for (let key of claves) {
-            let k = key.trim().toUpperCase();
-            if (k.includes("VIDA") || k.includes("UTIL") || k.includes("MES") || k.includes("FV") || k.includes("VENCIMIENTO")) {
-                let v = String(obj[key]).trim();
-                if (v && v !== "null" && v !== "undefined" && v !== "-") {
-                    return v;
+        let llaves = Object.keys(obj);
+        for (let k of llaves) {
+            let keyUpper = k.trim().toUpperCase();
+            if (keyUpper.includes("VIDA") || keyUpper.includes("UTIL") || keyUpper.includes("MES") || keyUpper.includes("FV") || keyUpper.includes("VENCIMIENTO")) {
+                let val = String(obj[k]).trim();
+                if (val && val !== "null" && val !== "undefined" && val !== "-") {
+                    return val;
                 }
             }
         }
         return "";
     }
 
-    /* CARGA DE DATOS: FV.json (Maestro principal) + 01.json a 50.json (Equivalencias EAN->SKU y respaldo) */
+    /* CARGA COMBINADA Y ASIGNACIÓN EXACTA CON NORMALIZACIÓN */
     function cargarArchivosBase() {
         let peticiones = [];
 
-        // 1. Cargar FV.json prioritario para SKU, Descripción y Vida Útil
         peticiones.push(
             fetch(`FV.json`)
             .then(res => res.ok ? res.json() : null)
             .catch(() => null)
         );
 
-        // 2. Cargar archivos fraccionados 01.json a 50.json
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
@@ -491,12 +489,12 @@
         Promise.all(peticiones).then(listas => {
             let fvLista = listas[0];
             
-            // A) Cargar FV.json
+            // 1. CARGAR FV.json
             if (fvLista && Array.isArray(fvLista)) {
                 fvLista.forEach(item => {
-                    let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
-                    let descVal = obtenerValorObjeto(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
-                    let vidaVal = buscarVidaUtilEnObjeto(item);
+                    let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
+                    let descVal = obtenerPropiedadUniversal(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
+                    let vidaVal = buscarVidaUtilGenerica(item);
 
                     let skuLimpio = limpiarCodigo(skuVal);
                     if (skuLimpio) {
@@ -508,15 +506,15 @@
                 });
             }
 
-            // B) Cargar 01.json - 50.json (Cruzar EAN -> SKU y complementar descripciones si faltan)
+            // 2. CARGAR 01.json A 50.json
             for (let i = 1; i < listas.length; i++) {
                 let lista = listas[i];
                 if (lista && Array.isArray(lista)) {
                     lista.forEach(item => {
-                        let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
-                        let eanVal = obtenerValorObjeto(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
-                        let descVal = obtenerValorObjeto(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion"]);
-                        let vidaVal = buscarVidaUtilEnObjeto(item);
+                        let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
+                        let eanVal = obtenerPropiedadUniversal(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
+                        let descVal = obtenerPropiedadUniversal(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion"]);
+                        let vidaVal = buscarVidaUtilGenerica(item);
 
                         let skuLimpio = limpiarCodigo(skuVal);
                         let eanLimpio = limpiarCodigo(eanVal);
@@ -525,7 +523,7 @@
                             if (!maestroSkuMap[skuLimpio]) {
                                 maestroSkuMap[skuLimpio] = { descripcion: descVal, vidaUtil: vidaVal };
                             } else {
-                                if (!maestroSkuMap[skuLimpio].descripcion && descVal) {
+                                if ((!maestroSkuMap[skuLimpio].descripcion || maestroSkuMap[skuLimpio].descripcion === "Sin descripción") && descVal) {
                                     maestroSkuMap[skuLimpio].descripcion = descVal;
                                 }
                                 if (!maestroSkuMap[skuLimpio].vidaUtil && vidaVal) {
@@ -550,7 +548,6 @@
         });
     }
 
-    /* FILA DE ENVÍO DE ALERTA INTACTA EN TIEMPO REAL */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -580,7 +577,6 @@
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* SINCRONIZACIÓN CONTINUA EN PANEL ADMIN */
     function sincronizarLecturaNube() {
         fetch(`${CANAL_SERVER}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
@@ -845,7 +841,7 @@
         }
     }
 
-    /* BÚSQUEDA SECUENCIAL CORRECTA: EAN -> SKU -> FV.json (Match garantizado) */
+    /* BÚSQUEDA Y MATCH ULTRA ROBUSTO */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
@@ -855,25 +851,24 @@
         if (!lecturaIngresada) return;
 
         let codigoLimpio = limpiarCodigo(lecturaIngresada);
+        let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
+        
         let skuFinal = "";
 
-        // 1. SI ES UN EAN PISTOLEADO, BUSCAR SU SKU EN 01-50.json
+        // 1. EVALUAR SI ES EAN (en eanASkuMap)
         if (eanASkuMap[codigoLimpio]) {
             skuFinal = eanASkuMap[codigoLimpio];
+        } else if (eanASkuMap[codigoSinCeros]) {
+            skuFinal = eanASkuMap[codigoSinCeros];
         } else {
-            let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
-            if (eanASkuMap[codigoSinCeros]) {
-                skuFinal = eanASkuMap[codigoSinCeros];
-            }
-        }
-
-        // SI NO ESTÁ EN EAN MAP, ASUMIMOS QUE ES UN SKU DIRECTAMENTE DIGITADO
-        if (!skuFinal) {
+            // SI NO SE ENCONTRÓ COMO EAN, SE TRATA COMO SKU DIRECTO
             skuFinal = codigoLimpio;
         }
 
-        // 2. HACER MATCH DIRECTO CON EL MAESTRO (FV.json Y RESPALDOS)
-        let infoMaestra = maestroSkuMap[skuFinal] || maestroSkuMap[skuFinal.replace(/^0+/, '')];
+        let skuFinalSinCeros = skuFinal.replace(/^0+/, '');
+
+        // 2. BUSCAR EN MAESTRO SKU
+        let infoMaestra = maestroSkuMap[skuFinal] || maestroSkuMap[skuFinalSinCeros];
 
         limpiarCalculadoraManual();
 
