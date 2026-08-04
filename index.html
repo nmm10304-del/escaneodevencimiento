@@ -436,9 +436,10 @@
         configurarEventosJulianosMóviles();
 
         sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 1000);
+        setInterval(sincronizarLecturaNube, 1200);
     }
 
+    /* LECTOR FLEXIBLE DE PROPIEDADES EN OBJETOS JSON */
     function obtenerPropiedadUniversal(obj, posiblesNombres) {
         if (!obj || typeof obj !== 'object') return "";
         let llaves = Object.keys(obj);
@@ -466,23 +467,17 @@
         return "";
     }
 
-    /* CARGA COMPLETA: FV.json + Libro 1.json + 01.json a 99.json */
+    /* CARGA COMBINADA Y ASIGNACIÓN EXACTA CON NORMALIZACIÓN */
     function cargarArchivosBase() {
         let peticiones = [];
 
-        // Archivos maestros explícitos
-        let archivosPrioritarios = ['FV.json', 'Libro 1.json', 'Libro1.json', 'libro 1.json', 'libro1.json'];
-        
-        archivosPrioritarios.forEach(archivo => {
-            peticiones.push(
-                fetch(archivo)
-                .then(res => res.ok ? res.json() : null)
-                .catch(() => null)
-            );
-        });
+        peticiones.push(
+            fetch(`FV.json`)
+            .then(res => res.ok ? res.json() : null)
+            .catch(() => null)
+        );
 
-        // Carga dinámica ilimitada de fraccionados (01 al 99)
-        for (let i = 1; i <= 99; i++) {
+        for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
                 fetch(`${numStr}.json`)
@@ -492,12 +487,33 @@
         }
 
         Promise.all(peticiones).then(listas => {
-            listas.forEach(lista => {
+            let fvLista = listas[0];
+            
+            // 1. CARGAR FV.json
+            if (fvLista && Array.isArray(fvLista)) {
+                fvLista.forEach(item => {
+                    let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
+                    let descVal = obtenerPropiedadUniversal(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
+                    let vidaVal = buscarVidaUtilGenerica(item);
+
+                    let skuLimpio = limpiarCodigo(skuVal);
+                    if (skuLimpio) {
+                        maestroSkuMap[skuLimpio] = {
+                            descripcion: descVal,
+                            vidaUtil: vidaVal
+                        };
+                    }
+                });
+            }
+
+            // 2. CARGAR 01.json A 50.json
+            for (let i = 1; i < listas.length; i++) {
+                let lista = listas[i];
                 if (lista && Array.isArray(lista)) {
                     lista.forEach(item => {
                         let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
                         let eanVal = obtenerPropiedadUniversal(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
-                        let descVal = obtenerPropiedadUniversal(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
+                        let descVal = obtenerPropiedadUniversal(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion"]);
                         let vidaVal = buscarVidaUtilGenerica(item);
 
                         let skuLimpio = limpiarCodigo(skuVal);
@@ -525,14 +541,13 @@
                         }
                     });
                 }
-            });
+            }
 
             document.getElementById('txt-status').innerText = `✅ Base FV activa (${Object.keys(maestroSkuMap).length} registros)`;
             document.getElementById('input-escaneo').focus();
         });
     }
 
-    /* FILA DE ENVÍO DE ALERTAS MANTENIDA Y REFORZADA EN TIEMPO REAL */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -551,12 +566,9 @@
 
         let mensajeData = `${valInput}___${fechaHoraCompleta}___${stampId}`;
 
-        // Envío garantizado a la nube con keepalive
         fetch(CANAL_SERVER, {
             method: 'POST',
-            body: mensajeData,
-            headers: { 'Content-Type': 'text/plain' },
-            keepalive: true
+            body: mensajeData
         }).then(() => {
             sincronizarLecturaNube();
         }).catch(() => {});
