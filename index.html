@@ -374,8 +374,8 @@
 </div>
 
 <script>
-    let eanASkuMap = {};          // Mapea EAN -> SKU + Descripción (desde 01.json .. 50.json)
-    let fvMaestroMap = {};        // Mapea SKU -> Vida Útil + Descripción (desde FV.json)
+    let eanASkuMap = {};          // Mapea EAN -> { sku, descripcion }
+    let fvMaestroMap = {};        // Mapea SKU -> { vidaUtil, descripcion }
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
@@ -467,18 +467,16 @@
         return "";
     }
 
-    /* CARGA COMBINADA: 1º FV.json (Maestro Vida Útil) y 2º 01-50.json (Equivalencias EAN -> SKU) */
+    /* CARGA CRUZADA: FV.json + ARCHIVOS 01 AL 50.json */
     function cargarArchivosBase() {
         let peticiones = [];
 
-        // Cargar FV.json
         peticiones.push(
             fetch(`FV.json`)
             .then(res => res.ok ? res.json() : null)
             .catch(() => null)
         );
 
-        // Cargar 01.json hasta 50.json
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
@@ -489,9 +487,8 @@
         }
 
         Promise.all(peticiones).then(listas => {
-            let fvLista = listas[0]; // FV.json es la posición 0
+            let fvLista = listas[0];
             
-            // 1. PROCESAR FV.json PARA VINCULAR SKU CON VIDA ÚTIL
             if (fvLista && Array.isArray(fvLista)) {
                 fvLista.forEach(item => {
                     let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
@@ -509,7 +506,6 @@
                 document.getElementById('txt-status').innerText = `✅ Base FV activa (${Object.keys(fvMaestroMap).length} artículos)`;
             }
 
-            // 2. PROCESAR ARCHIVOS 01.json A 50.json PARA CRUZAR EAN -> SKU
             for (let i = 1; i < listas.length; i++) {
                 let lista = listas[i];
                 if (lista && Array.isArray(lista)) {
@@ -522,18 +518,20 @@
                         let skuLimpio = limpiarCodigo(skuVal);
                         let eanLimpio = limpiarCodigo(eanVal);
 
-                        if (skuLimpio && !fvMaestroMap[skuLimpio]) {
-                            fvMaestroMap[skuLimpio] = {
-                                descripcion: descVal,
-                                vidaUtil: vidaVal
-                            };
+                        // SI EN FV.json NO HABÍA DESCRIPCIÓN, COMPLEMENTARLA CON LOS ARCHIVOS 01..50
+                        if (skuLimpio) {
+                            if (!fvMaestroMap[skuLimpio]) {
+                                fvMaestroMap[skuLimpio] = { descripcion: descVal, vidaUtil: vidaVal };
+                            } else if ((!fvMaestroMap[skuLimpio].descripcion || fvMaestroMap[skuLimpio].descripcion === "Sin descripción") && descVal) {
+                                fvMaestroMap[skuLimpio].descripcion = descVal;
+                            }
                         }
 
                         if (eanLimpio && skuLimpio) {
-                            eanASkuMap[eanLimpio] = skuLimpio;
+                            eanASkuMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal };
                             let eanSinCeros = eanLimpio.replace(/^0+/, '');
                             if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
-                                eanASkuMap[eanSinCeros] = skuLimpio;
+                                eanASkuMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal };
                             }
                         }
                     });
@@ -544,7 +542,6 @@
         });
     }
 
-    /* REPORTE EN TIEMPO REAL DESDE CUALQUIER MÓVIL/POCKET A LA PC */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -574,7 +571,6 @@
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* SINCRONIZACIÓN CONTINUA EN PC */
     function sincronizarLecturaNube() {
         fetch(`${CANAL_SERVER}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
@@ -839,7 +835,7 @@
         }
     }
 
-    /* BÚSQUEDA EXACТA CON FLUJO: EAN -> SKU -> FV.json */
+    /* BÚSQUEDA Y CRUCE COMPLETO EAN / SKU / DESCRIPCIÓN / VIDA ÚTIL */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
@@ -853,27 +849,32 @@
         let descripcionFinal = "";
         let vidaUtilFinal = "";
 
-        // 1. SI ES UN EAN, BUSCAR SU SKU EN EL MAPA DE ARCHIVOS (01-50.json)
+        // 1. SI ES UN EAN, BUSCAR SKU Y DESCRIPCIÓN EN EL MAPA DE ARCHIVOS (01..50.json)
         if (eanASkuMap[codigoLimpio]) {
-            skuFinal = eanASkuMap[codigoLimpio];
+            skuFinal = eanASkuMap[codigoLimpio].sku;
+            descripcionFinal = eanASkuMap[codigoLimpio].descripcion || "";
         } else {
             let codigoSinCeros = codigoLimpio.replace(/^0+/, '');
             if (eanASkuMap[codigoSinCeros]) {
-                skuFinal = eanASkuMap[codigoSinCeros];
+                skuFinal = eanASkuMap[codigoSinCeros].sku;
+                descripcionFinal = eanASkuMap[codigoSinCeros].descripcion || "";
             }
         }
 
-        // SI NO ES EAN O NO SE ENCONTRÓ EQUIVALENCIA, ASUMIR QUE INGRESÓ DIRECTAMENTE EL SKU
         if (!skuFinal) {
             skuFinal = codigoLimpio;
         }
 
-        // 2. CON EL SKU FINAL, BUSCAR EN EL MAESTRO DE VIDA ÚTIL (FV.json)
+        // 2. BUSCAR EN MAESTRO FV.json LA VIDA ÚTIL Y COMPLEMENTAR DESCRIPCIÓN SI HACE FALTA
         let infoMaestra = fvMaestroMap[skuFinal] || fvMaestroMap[skuFinal.replace(/^0+/, '')];
 
         if (infoMaestra) {
-            descripcionFinal = infoMaestra.descripcion || "";
-            vidaUtilFinal = infoMaestra.vidaUtil || "";
+            if (infoMaestra.vidaUtil) {
+                vidaUtilFinal = infoMaestra.vidaUtil;
+            }
+            if ((!descripcionFinal || descripcionFinal === "Sin descripción") && infoMaestra.descripcion) {
+                descripcionFinal = infoMaestra.descripcion;
+            }
         }
 
         limpiarCalculadoraManual();
