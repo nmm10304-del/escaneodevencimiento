@@ -380,8 +380,8 @@
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
 
-    // CANAL DE RELEVOS NATIVO ULTRA-RÁPIDO EN TIEMPO REAL
-    const CANAL_TRANSMISION = "https://ntfy.sh/promart_almacen_alertas_canal_2026";
+    // CANAL DE TRANSMISIÓN NTFY DIRECTO ANTI-CORS CON PERSISTENCIA
+    const CANAL_NTFY = "https://ntfy.sh/promart_almacen_live_2026_realtime";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -426,6 +426,7 @@
         let cacheGuardada = localStorage.getItem('promart_maestro_json');
         let horaGuardada = localStorage.getItem('promart_hora_actualizacion');
         let borradosGuardados = localStorage.getItem('promart_borrados_pc');
+        let alertasLocales = localStorage.getItem('promart_alertas_locales');
 
         if (cacheGuardada) {
             try {
@@ -440,15 +441,34 @@
             try { reportesBorradosLocal = new Set(JSON.parse(borradosGuardados)); } catch(e){}
         }
 
+        if (alertasLocales) {
+            try { reportesAlertas = JSON.parse(alertasLocales); } catch(e){}
+        }
+
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
-        // Escucha en vivo continua sin cortes
         sincronizarLecturaNube();
         setInterval(sincronizarLecturaNube, 1000);
     }
 
-    /* OBTENER PROPIEDAD FLEXIBLE DE ARCHIVOS JSON */
+    /* BÚSQUEDA EXHAUSTIVA DE CAMPOS EN ARCHIVOS JSON */
+    function buscarVidaUtilEnObjeto(obj) {
+        if (!obj || typeof obj !== 'object') return "";
+        
+        let claves = Object.keys(obj);
+        for (let key of claves) {
+            let keyLimpia = key.trim().toLowerCase();
+            if (keyLimpia.includes("vida") || keyLimpia.includes("util") || keyLimpia.includes("meses") || keyLimpia.includes("mes")) {
+                let val = String(obj[key]).trim();
+                if (val && val !== "undefined" && val !== "null") {
+                    return val;
+                }
+            }
+        }
+        return "";
+    }
+
     function obtenerValorObjeto(obj, listaClaves) {
         if (!obj) return "";
         let llavesObjeto = Object.keys(obj);
@@ -479,7 +499,7 @@
                         let skuVal = obtenerValorObjeto(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
                         let eanVal = obtenerValorObjeto(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
                         let descVal = obtenerValorObjeto(item, ["DESCRIPCIÓN", "DESCRIPCION", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
-                        let vidaVal = obtenerValorObjeto(item, ["VIDA UTIL", "VIDA ÚTIL", "vidaUtil", "vida_util", "Vida Util", "VIDA_UTIL", "VIDA", "Vida", "VIDA UTIL (MESES)", "VIDA ÚTIL (MESES)"]);
+                        let vidaVal = buscarVidaUtilEnObjeto(item);
 
                         let skuLimpio = limpiarCodigo(skuVal);
                         let eanLimpio = limpiarCodigo(eanVal);
@@ -524,7 +544,8 @@
 
         let mensaje = `${valInput}___${fechaHoraCompleta}___${stampId}`;
 
-        fetch(CANAL_TRANSMISION, {
+        // Enviar evento directo a la nube
+        fetch(CANAL_NTFY, {
             method: 'POST',
             body: mensaje
         }).then(() => {
@@ -535,14 +556,19 @@
         document.getElementById('input-escaneo').value = "";
     }
 
-    /* SINCRONIZACIÓN CONTINUA EN PC */
+    /* SINCRONIZACIÓN LECTURA CONTINUA EN PC */
     function sincronizarLecturaNube() {
-        fetch(`${CANAL_TRANSMISION}/json?poll=1`)
+        fetch(`${CANAL_NTFY}/json?poll=1`)
             .then(res => res.ok ? res.text() : "")
             .then(textoBruto => {
                 if (textoBruto) {
                     let lineas = textoBruto.trim().split('\n');
-                    let listaNuevos = [];
+                    let mapaNuevos = new Map();
+
+                    // Cargar existentes
+                    reportesAlertas.forEach(item => {
+                        if (item && item.id) mapaNuevos.set(item.id, item);
+                    });
 
                     lineas.forEach(linea => {
                         try {
@@ -554,7 +580,7 @@
                                 let idUnique = partes[2] || (cod + "_" + fech);
 
                                 if (!reportesBorradosLocal.has(idUnique)) {
-                                    listaNuevos.unshift({
+                                    mapaNuevos.set(idUnique, {
                                         id: idUnique,
                                         codigo: cod,
                                         fechaHora: fech
@@ -564,7 +590,10 @@
                         } catch(e) {}
                     });
 
-                    reportesAlertas = listaNuevos;
+                    let arrayResultado = Array.from(mapaNuevos.values());
+                    arrayResultado.sort((a,b) => String(b.id).localeCompare(String(a.id)));
+                    reportesAlertas = arrayResultado;
+                    localStorage.setItem('promart_alertas_locales', JSON.stringify(reportesAlertas));
                 }
 
                 if (document.getElementById('modal-admin').style.display === 'flex') {
@@ -635,6 +664,7 @@
             localStorage.setItem('promart_borrados_pc', JSON.stringify(Array.from(reportesBorradosLocal)));
         }
         reportesAlertas.splice(index, 1);
+        localStorage.setItem('promart_alertas_locales', JSON.stringify(reportesAlertas));
         actualizarListaAlertasAdmin();
     }
 
@@ -646,6 +676,7 @@
         });
         localStorage.setItem('promart_borrados_pc', JSON.stringify(Array.from(reportesBorradosLocal)));
         reportesAlertas = [];
+        localStorage.removeItem('promart_alertas_locales');
         actualizarListaAlertasAdmin();
     }
 
@@ -791,7 +822,7 @@
         }
     }
 
-    /* BÚSQUEDA Y EXTRACCIÓN PERSISTENTE N VECES */
+    /* BÚSQUEDA ROBUSTA QUE EXTRAE VIDA ÚTIL */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
