@@ -375,6 +375,14 @@
         <span class="cerrar-modal" onclick="cerrarModoAdmin()">&times;</span>
         <h3 style="color: #ff6a00; margin-top:0;">Panel de Administrador</h3>
         
+        <div style="margin-bottom: 15px; background: #fff3cd; padding: 10px; border-radius: 6px; border: 1px solid #ffeeba;">
+            <label><b>Configurar Cantidad Personalizada de SKUs:</b></label>
+            <div style="display: flex; gap: 8px; margin-top: 5px;">
+                <input type="tel" id="input-skus-admin" placeholder="Ej. 1788" style="margin-top:0;">
+                <button class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar</button>
+            </div>
+        </div>
+
         <label><b>Códigos Reportados por el Personal:</b></label>
         <div id="lista-alertas" class="lista-reportes">Cargando reportes en vivo...</div>
         <button class="btn-alerta" style="margin-top:15px;" onclick="limpiarAlertasAdmin()">Limpiar Historial de Alertas</button>
@@ -387,6 +395,8 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
+    let fechaHoraCargaTexto = "";
+    let totalSkusCalculados = 0;
 
     const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_global_v2026";
 
@@ -475,7 +485,29 @@
         return "";
     }
 
-    /* CARGA COMBINADA AUTOMÁTICA CON CONTEO DE SKUs Y FECHA DINÁMICA DE CABECERA */
+    function actualizarTextoPiePagina() {
+        let skusPersonalizados = localStorage.getItem('promart_custom_skus_count');
+        let skuMostrar = skusPersonalizados ? skusPersonalizados : totalSkusCalculados;
+
+        if (fechaHoraCargaTexto) {
+            document.getElementById('txt-status').innerText = `✅ Actualizado el ${fechaHoraCargaTexto} con ${skuMostrar} SKUs`;
+        }
+    }
+
+    function guardarCantidadSkusAdmin() {
+        let valInput = document.getElementById('input-skus-admin').value.trim();
+        if (valInput) {
+            localStorage.setItem('promart_custom_skus_count', valInput);
+            actualizarTextoPiePagina();
+            mostrarModalInfo("Éxito", `Se actualizó la cantidad a ${valInput} SKUs.`);
+        } else {
+            localStorage.removeItem('promart_custom_skus_count');
+            actualizarTextoPiePagina();
+            mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs.");
+        }
+    }
+
+    /* CARGA COMBINADA DE BASES Y GENERACIÓN DEL NUEVO FORMATO */
     function cargarArchivosBase() {
         let peticiones = [];
 
@@ -506,7 +538,6 @@
                 if (resObj && resObj.data && Array.isArray(resObj.data)) {
                     let lista = resObj.data;
 
-                    // Extraer fecha del encabezado HTTP Last-Modified si existe
                     if (resObj.response) {
                         let headerDate = resObj.response.headers.get('last-modified');
                         if (headerDate) {
@@ -553,7 +584,6 @@
                 }
             });
 
-            // Si no se pudo obtener la fecha del header, tomar la hora de lectura actual
             let fechaDisplay = fechaUltimaModificacion || new Date();
 
             let dd = String(fechaDisplay.getDate()).padStart(2, '0');
@@ -563,10 +593,10 @@
             let min = String(fechaDisplay.getMinutes()).padStart(2, '0');
             let ss = String(fechaDisplay.getSeconds()).padStart(2, '0');
 
-            let fechaHoraTexto = `Actualizado el ${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
-            let totalSkusContados = skusFVDirectos.size > 0 ? skusFVDirectos.size : Object.keys(maestroSkuMap).length;
+            fechaHoraCargaTexto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
+            totalSkusCalculados = skusFVDirectos.size > 0 ? skusFVDirectos.size : Object.keys(maestroSkuMap).length;
 
-            document.getElementById('txt-status').innerText = `✅ Base FV activa (${totalSkusContados} SKUs) - ${fechaHoraTexto}`;
+            actualizarTextoPiePagina();
             document.getElementById('input-escaneo').focus();
         });
     }
@@ -658,6 +688,8 @@
 
         if (!esPantallaTactil && !esAnchoMovil) {
             document.getElementById('input-clave-admin').value = "";
+            let skusPers = localStorage.getItem('promart_custom_skus_count');
+            document.getElementById('input-skus-admin').value = skusPers || "";
             document.getElementById('modal-clave').style.display = 'flex';
             document.getElementById('input-clave-admin').focus();
         }
