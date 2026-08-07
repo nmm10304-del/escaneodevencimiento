@@ -311,7 +311,7 @@
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil:</b> <span id="vida-val" class="no-registra">---</span></div>
     </div>
-    <div id="txt-status" class="info-status">✅ Sistema listo</div>
+    <div id="txt-status" class="info-status">✅ Cargar data...</div>
 
     <div class="seccion-juliana">
         <h2>Vencimiento del producto</h2>
@@ -388,7 +388,6 @@
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
 
-    // ENDPOINT GLOBAL SIN RESTRICCIONES DE RED O ORIGEN
     const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_global_v2026";
 
     function bloquearLetras(e) {
@@ -476,16 +475,16 @@
         return "";
     }
 
-    /* CARGA COMBINADA DE BASES Y TABLAS */
+    /* CARGA COMBINADA AUTOMÁTICA CON CONTEO DE SKUs Y FECHA DINÁMICA DE CABECERA */
     function cargarArchivosBase() {
         let peticiones = [];
 
-        let archivosBases = ['Libro1.json', 'FV.json', 'Libro 1.json', 'libro1.json'];
+        let archivosBases = ['FV.json', 'Libro1.json', 'Libro 1.json', 'libro1.json'];
         
         archivosBases.forEach(archivo => {
             peticiones.push(
                 fetch(archivo)
-                .then(res => res.ok ? res.json() : null)
+                .then(res => res.ok ? res.json().then(data => ({ data, response: res })) : null)
                 .catch(() => null)
             );
         });
@@ -494,14 +493,32 @@
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
                 fetch(`${numStr}.json`)
-                .then(res => res.ok ? res.json() : null)
+                .then(res => res.ok ? res.json().then(data => ({ data, response: res })) : null)
                 .catch(() => null)
             );
         }
 
-        Promise.all(peticiones).then(listas => {
-            listas.forEach(lista => {
-                if (lista && Array.isArray(lista)) {
+        Promise.all(peticiones).then(resultados => {
+            let fechaUltimaModificacion = null;
+            let skusFVDirectos = new Set();
+
+            resultados.forEach(resObj => {
+                if (resObj && resObj.data && Array.isArray(resObj.data)) {
+                    let lista = resObj.data;
+
+                    // Extraer fecha del encabezado HTTP Last-Modified si existe
+                    if (resObj.response) {
+                        let headerDate = resObj.response.headers.get('last-modified');
+                        if (headerDate) {
+                            let dHeader = new Date(headerDate);
+                            if (!isNaN(dHeader.getTime())) {
+                                if (!fechaUltimaModificacion || dHeader > fechaUltimaModificacion) {
+                                    fechaUltimaModificacion = dHeader;
+                                }
+                            }
+                        }
+                    }
+
                     lista.forEach(item => {
                         let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
                         let eanVal = obtenerPropiedadUniversal(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
@@ -512,6 +529,7 @@
                         let eanLimpio = limpiarCodigo(eanVal);
 
                         if (skuLimpio) {
+                            skusFVDirectos.add(skuLimpio);
                             if (!maestroSkuMap[skuLimpio]) {
                                 maestroSkuMap[skuLimpio] = { descripcion: descVal, vidaUtil: vidaVal };
                             } else {
@@ -535,7 +553,20 @@
                 }
             });
 
-            document.getElementById('txt-status').innerText = `✅ Base FV activa (${Object.keys(maestroSkuMap).length} registros)`;
+            // Si no se pudo obtener la fecha del header, tomar la hora de lectura actual
+            let fechaDisplay = fechaUltimaModificacion || new Date();
+
+            let dd = String(fechaDisplay.getDate()).padStart(2, '0');
+            let mm = String(fechaDisplay.getMonth() + 1).padStart(2, '0');
+            let yyyy = fechaDisplay.getFullYear();
+            let hh = String(fechaDisplay.getHours()).padStart(2, '0');
+            let min = String(fechaDisplay.getMinutes()).padStart(2, '0');
+            let ss = String(fechaDisplay.getSeconds()).padStart(2, '0');
+
+            let fechaHoraTexto = `Actualizado el ${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
+            let totalSkusContados = skusFVDirectos.size > 0 ? skusFVDirectos.size : Object.keys(maestroSkuMap).length;
+
+            document.getElementById('txt-status').innerText = `✅ Base FV activa (${totalSkusContados} SKUs) - ${fechaHoraTexto}`;
             document.getElementById('input-escaneo').focus();
         });
     }
@@ -559,7 +590,6 @@
 
         let mensajeData = `${valInput}___${fechaHoraCompleta}___${stampId}`;
 
-        // Transmisión directa multidispositivo con fallback transparente
         try {
             fetch(CANAL_SERVER, {
                 method: 'POST',
@@ -569,7 +599,6 @@
             });
         } catch(e) {}
 
-        // Guardado local en caso de desconexión momentánea
         let itemLocal = { id: stampId, codigo: valInput, fechaHora: fechaHoraCompleta };
         reportesAlertas.unshift(itemLocal);
         localStorage.setItem('promart_alertas_locales', JSON.stringify(reportesAlertas));
