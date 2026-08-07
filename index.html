@@ -376,10 +376,10 @@
         <h3 style="color: #ff6a00; margin-top:0;">Panel de Administrador</h3>
         
         <div style="margin-bottom: 15px; background: #fff3cd; padding: 10px; border-radius: 6px; border: 1px solid #ffeeba;">
-            <label><b>Configurar Cantidad Personalizada de SKUs:</b></label>
+            <label><b>Configurar Cantidad Global de SKUs:</b></label>
             <div style="display: flex; gap: 8px; margin-top: 5px;">
                 <input type="tel" id="input-skus-admin" placeholder="Ej. 1788" style="margin-top:0;">
-                <button class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar</button>
+                <button class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar Global</button>
             </div>
         </div>
 
@@ -397,8 +397,10 @@
     let reportesBorradosLocal = new Set();
     let fechaHoraCargaTexto = "";
     let totalSkusCalculados = 0;
+    let skusPersonalizadosGlobal = "";
 
     const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_global_v2026";
+    const CANAL_SKUS_CFG = "https://ntfy.sh/promart_almacen_skus_config_v2026";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -451,11 +453,13 @@
             try { reportesAlertas = JSON.parse(alertasLocales); } catch(e){}
         }
 
+        sincronizarSkusConfigNube();
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
         sincronizarLecturaNube();
         setInterval(sincronizarLecturaNube, 1200);
+        setInterval(sincronizarSkusConfigNube, 3000);
     }
 
     function obtenerPropiedadUniversal(obj, posiblesNombres) {
@@ -486,24 +490,51 @@
     }
 
     function actualizarTextoPiePagina() {
-        let skusPersonalizados = localStorage.getItem('promart_custom_skus_count');
-        let skuMostrar = skusPersonalizados ? skusPersonalizados : totalSkusCalculados;
+        let skuMostrar = skusPersonalizadosGlobal ? skusPersonalizadosGlobal : totalSkusCalculados;
 
         if (fechaHoraCargaTexto) {
             document.getElementById('txt-status').innerText = `✅ Actualizado el ${fechaHoraCargaTexto} con ${skuMostrar} SKUs`;
         }
     }
 
+    function sincronizarSkusConfigNube() {
+        fetch(`${CANAL_SKUS_CFG}/json?poll=1&r=${Date.now()}`)
+            .then(res => res.ok ? res.text() : "")
+            .then(textoBruto => {
+                if (textoBruto) {
+                    let lineas = textoBruto.trim().split('\n');
+                    let ultimaLinea = lineas[lineas.length - 1];
+                    try {
+                        let obj = JSON.parse(ultimaLinea);
+                        if (obj.message) {
+                            skusPersonalizadosGlobal = obj.message.trim();
+                            actualizarTextoPiePagina();
+                        }
+                    } catch(e){}
+                }
+            })
+            .catch(() => {});
+    }
+
     function guardarCantidadSkusAdmin() {
         let valInput = document.getElementById('input-skus-admin').value.trim();
+        
+        try {
+            fetch(CANAL_SKUS_CFG, {
+                method: 'POST',
+                body: valInput,
+                headers: { 'Content-Type': 'text/plain' },
+                mode: 'no-cors'
+            });
+        } catch(e) {}
+
+        skusPersonalizadosGlobal = valInput;
+        actualizarTextoPiePagina();
+        
         if (valInput) {
-            localStorage.setItem('promart_custom_skus_count', valInput);
-            actualizarTextoPiePagina();
-            mostrarModalInfo("Éxito", `Se actualizó la cantidad a ${valInput} SKUs.`);
+            mostrarModalInfo("Éxito", `Se transmitió globalmente la cantidad de ${valInput} SKUs.`);
         } else {
-            localStorage.removeItem('promart_custom_skus_count');
-            actualizarTextoPiePagina();
-            mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs.");
+            mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs en todos los dispositivos.");
         }
     }
 
@@ -688,8 +719,7 @@
 
         if (!esPantallaTactil && !esAnchoMovil) {
             document.getElementById('input-clave-admin').value = "";
-            let skusPers = localStorage.getItem('promart_custom_skus_count');
-            document.getElementById('input-skus-admin').value = skusPers || "";
+            document.getElementById('input-skus-admin').value = skusPersonalizadosGlobal || "";
             document.getElementById('modal-clave').style.display = 'flex';
             document.getElementById('input-clave-admin').focus();
         }
