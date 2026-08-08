@@ -387,6 +387,14 @@
         <span class="cerrar-modal" onclick="cerrarModoAdmin()">&times;</span>
         <h3 style="color: #ff6a00; margin-top:0;">Panel de Administrador</h3>
         
+        <div style="margin-bottom: 15px; background: #fff3cd; padding: 10px; border-radius: 6px; border: 1px solid #ffeeba;">
+            <label><b>Editar Cantidad de SKUs:</b></label>
+            <div style="display: flex; gap: 8px; margin-top: 5px;">
+                <input type="tel" id="input-skus-admin" placeholder="Ej. 1788" style="margin-top:0;">
+                <button class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar</button>
+            </div>
+        </div>
+
         <label><b>Códigos Reportados por el Personal:</b></label>
         <div id="lista-alertas" class="lista-reportes">Cargando reportes en vivo...</div>
         <button class="btn-alerta" style="margin-top:15px;" onclick="limpiarAlertasAdmin()">Limpiar Historial de Alertas</button>
@@ -399,8 +407,12 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
+    let fechaHoraCargaTexto = "";
+    let totalSkusCalculados = 0;
+    let skusPersonalizadosGlobal = "";
 
     const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_global_v2026";
+    const CANAL_SKUS_CFG = "https://ntfy.sh/promart_almacen_skus_config_v2026";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -453,11 +465,13 @@
             try { reportesAlertas = JSON.parse(alertasLocales); } catch(e){}
         }
 
+        sincronizarSkusConfigNube();
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
         sincronizarLecturaNube();
         setInterval(sincronizarLecturaNube, 1200);
+        setInterval(sincronizarSkusConfigNube, 3000);
     }
 
     function obtenerPropiedadUniversal(obj, posiblesNombres) {
@@ -487,25 +501,78 @@
         return "";
     }
 
+    function actualizarTextoPiePagina() {
+        let customLocal = localStorage.getItem('promart_custom_skus_count');
+        let skuMostrar = customLocal ? customLocal : (skusPersonalizadosGlobal ? skusPersonalizadosGlobal : totalSkusCalculados);
+
+        if (fechaHoraCargaTexto) {
+            document.getElementById('txt-status').innerText = `✅ Actualizado el ${fechaHoraCargaTexto} con ${skuMostrar} SKUs`;
+        }
+    }
+
+    function sincronizarSkusConfigNube() {
+        fetch(`${CANAL_SKUS_CFG}/json?poll=1&r=${Date.now()}`)
+            .then(res => res.ok ? res.text() : "")
+            .then(textoBruto => {
+                if (textoBruto) {
+                    let lineas = textoBruto.trim().split('\n');
+                    let ultimaLinea = lineas[lineas.length - 1];
+                    try {
+                        let obj = JSON.parse(ultimaLinea);
+                        if (obj.message) {
+                            skusPersonalizadosGlobal = obj.message.trim();
+                            actualizarTextoPiePagina();
+                        }
+                    } catch(e){}
+                }
+            })
+            .catch(() => {});
+    }
+
+    function guardarCantidadSkusAdmin() {
+        let valInput = document.getElementById('input-skus-admin').value.trim();
+        
+        if (valInput) {
+            localStorage.setItem('promart_custom_skus_count', valInput);
+        } else {
+            localStorage.removeItem('promart_custom_skus_count');
+        }
+
+        try {
+            fetch(CANAL_SKUS_CFG, {
+                method: 'POST',
+                body: valInput,
+                headers: { 'Content-Type': 'text/plain' },
+                mode: 'no-cors'
+            });
+        } catch(e) {}
+
+        skusPersonalizadosGlobal = valInput;
+        actualizarTextoPiePagina();
+        
+        if (valInput) {
+            mostrarModalInfo("Éxito", `Se actualizó la cantidad a ${valInput} SKUs.`);
+        } else {
+            mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs.");
+        }
+    }
+
     /* LECTURA EXCLUSIVA DE FV.json Y ACTUALIZACIÓN AUTOMÁTICA CON CADA SUBIDA A GITHUB */
     function cargarArchivosBase() {
         let peticiones = [];
 
-        // 1. Cargar explícitamente FV.json registrando sus headers HTTP
         peticiones.push(
             fetch(`FV.json?nocache=${Date.now()}`)
             .then(res => res.ok ? res.json().then(data => ({ data, response: res, esFV: true })) : null)
             .catch(() => null)
         );
 
-        // 2. Cargar Libro1.json
         peticiones.push(
             fetch(`Libro1.json?nocache=${Date.now()}`)
             .then(res => res.ok ? res.json().then(data => ({ data, response: res, esFV: false })) : null)
             .catch(() => null)
         );
 
-        // 3. Cargar fraccionados 01.json al 50.json
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
@@ -523,7 +590,6 @@
                 if (resObj && resObj.data && Array.isArray(resObj.data)) {
                     let lista = resObj.data;
 
-                    // Si es el archivo FV.json, extraer su fecha exacta de subida y sus SKUs
                     if (resObj.esFV) {
                         if (resObj.response) {
                             let headerDate = resObj.response.headers.get('last-modified');
@@ -542,7 +608,6 @@
                         });
                     }
 
-                    // Construcción del maestro general de datos
                     lista.forEach(item => {
                         let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
                         let eanVal = obtenerPropiedadUniversal(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
@@ -576,7 +641,6 @@
                 }
             });
 
-            // Usar la fecha de última modificación de FV.json o la fecha actual de respaldo
             let fechaDisplay = fechaModificacionFV || new Date();
 
             let dd = String(fechaDisplay.getDate()).padStart(2, '0');
@@ -586,10 +650,10 @@
             let min = String(fechaDisplay.getMinutes()).padStart(2, '0');
             let ss = String(fechaDisplay.getSeconds()).padStart(2, '0');
 
-            let fechaHoraTexto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
-            let totalSKUsFV = skusUnicosFV.size > 0 ? skusUnicosFV.size : 1788;
+            fechaHoraCargaTexto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
+            totalSkusCalculados = skusUnicosFV.size > 0 ? skusUnicosFV.size : 1788;
 
-            document.getElementById('txt-status').innerText = `✅ Actualizado el ${fechaHoraTexto} con ${totalSKUsFV} SKUs`;
+            actualizarTextoPiePagina();
             document.getElementById('input-escaneo').focus();
         });
     }
@@ -681,6 +745,8 @@
 
         if (!esPantallaTactil && !esAnchoMovil) {
             document.getElementById('input-clave-admin').value = "";
+            let customLocal = localStorage.getItem('promart_custom_skus_count');
+            document.getElementById('input-skus-admin').value = customLocal || skusPersonalizadosGlobal || "";
             document.getElementById('modal-clave').style.display = 'flex';
             document.getElementById('input-clave-admin').focus();
         }
