@@ -387,14 +387,6 @@
         <span class="cerrar-modal" onclick="cerrarModoAdmin()">&times;</span>
         <h3 style="color: #ff6a00; margin-top:0;">Panel de Administrador</h3>
         
-        <div style="margin-bottom: 15px; background: #fff3cd; padding: 10px; border-radius: 6px; border: 1px solid #ffeeba;">
-            <label><b>Configurar Cantidad Global de SKUs:</b></label>
-            <div style="display: flex; gap: 8px; margin-top: 5px;">
-                <input type="tel" id="input-skus-admin" placeholder="Ej. 1788" style="margin-top:0;">
-                <button class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar Global</button>
-            </div>
-        </div>
-
         <label><b>Códigos Reportados por el Personal:</b></label>
         <div id="lista-alertas" class="lista-reportes">Cargando reportes en vivo...</div>
         <button class="btn-alerta" style="margin-top:15px;" onclick="limpiarAlertasAdmin()">Limpiar Historial de Alertas</button>
@@ -407,12 +399,8 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
-    let fechaHoraCargaTexto = "";
-    let totalSkusCalculados = 0;
-    let skusPersonalizadosGlobal = "";
 
     const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_global_v2026";
-    const CANAL_SKUS_CFG = "https://ntfy.sh/promart_almacen_skus_config_v2026";
 
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -465,13 +453,11 @@
             try { reportesAlertas = JSON.parse(alertasLocales); } catch(e){}
         }
 
-        sincronizarSkusConfigNube();
         cargarArchivosBase();
         configurarEventosJulianosMóviles();
 
         sincronizarLecturaNube();
         setInterval(sincronizarLecturaNube, 1200);
-        setInterval(sincronizarSkusConfigNube, 3000);
     }
 
     function obtenerPropiedadUniversal(obj, posiblesNombres) {
@@ -501,98 +487,62 @@
         return "";
     }
 
-    function actualizarTextoPiePagina() {
-        let skuMostrar = skusPersonalizadosGlobal ? skusPersonalizadosGlobal : totalSkusCalculados;
-
-        if (fechaHoraCargaTexto) {
-            document.getElementById('txt-status').innerText = `✅ Actualizado el ${fechaHoraCargaTexto} con ${skuMostrar} SKUs`;
-        }
-    }
-
-    function sincronizarSkusConfigNube() {
-        fetch(`${CANAL_SKUS_CFG}/json?poll=1&r=${Date.now()}`)
-            .then(res => res.ok ? res.text() : "")
-            .then(textoBruto => {
-                if (textoBruto) {
-                    let lineas = textoBruto.trim().split('\n');
-                    let ultimaLinea = lineas[lineas.length - 1];
-                    try {
-                        let obj = JSON.parse(ultimaLinea);
-                        if (obj.message) {
-                            skusPersonalizadosGlobal = obj.message.trim();
-                            actualizarTextoPiePagina();
-                        }
-                    } catch(e){}
-                }
-            })
-            .catch(() => {});
-    }
-
-    function guardarCantidadSkusAdmin() {
-        let valInput = document.getElementById('input-skus-admin').value.trim();
-        
-        try {
-            fetch(CANAL_SKUS_CFG, {
-                method: 'POST',
-                body: valInput,
-                headers: { 'Content-Type': 'text/plain' },
-                mode: 'no-cors'
-            });
-        } catch(e) {}
-
-        skusPersonalizadosGlobal = valInput;
-        actualizarTextoPiePagina();
-        
-        if (valInput) {
-            mostrarModalInfo("Éxito", `Se transmitió globalmente la cantidad de ${valInput} SKUs.`);
-        } else {
-            mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs en todos los dispositivos.");
-        }
-    }
-
-    /* CARGA COMBINADA DE BASES Y GENERACIÓN DEL NUEVO FORMATO */
+    /* LECTURA EXCLUSIVA DE FV.json Y ACTUALIZACIÓN AUTOMÁTICA CON CADA SUBIDA A GITHUB */
     function cargarArchivosBase() {
         let peticiones = [];
 
-        let archivosBases = ['FV.json', 'Libro1.json', 'Libro 1.json', 'libro1.json'];
-        
-        archivosBases.forEach(archivo => {
-            peticiones.push(
-                fetch(archivo)
-                .then(res => res.ok ? res.json().then(data => ({ data, response: res })) : null)
-                .catch(() => null)
-            );
-        });
+        // 1. Cargar explícitamente FV.json registrando sus headers HTTP
+        peticiones.push(
+            fetch(`FV.json?nocache=${Date.now()}`)
+            .then(res => res.ok ? res.json().then(data => ({ data, response: res, esFV: true })) : null)
+            .catch(() => null)
+        );
 
+        // 2. Cargar Libro1.json
+        peticiones.push(
+            fetch(`Libro1.json?nocache=${Date.now()}`)
+            .then(res => res.ok ? res.json().then(data => ({ data, response: res, esFV: false })) : null)
+            .catch(() => null)
+        );
+
+        // 3. Cargar fraccionados 01.json al 50.json
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
-                fetch(`${numStr}.json`)
-                .then(res => res.ok ? res.json().then(data => ({ data, response: res })) : null)
+                fetch(`${numStr}.json?nocache=${Date.now()}`)
+                .then(res => res.ok ? res.json().then(data => ({ data, response: res, esFV: false })) : null)
                 .catch(() => null)
             );
         }
 
         Promise.all(peticiones).then(resultados => {
-            let fechaUltimaModificacion = null;
-            let skusFVDirectos = new Set();
+            let fechaModificacionFV = null;
+            let skusUnicosFV = new Set();
 
             resultados.forEach(resObj => {
                 if (resObj && resObj.data && Array.isArray(resObj.data)) {
                     let lista = resObj.data;
 
-                    if (resObj.response) {
-                        let headerDate = resObj.response.headers.get('last-modified');
-                        if (headerDate) {
-                            let dHeader = new Date(headerDate);
-                            if (!isNaN(dHeader.getTime())) {
-                                if (!fechaUltimaModificacion || dHeader > fechaUltimaModificacion) {
-                                    fechaUltimaModificacion = dHeader;
+                    // Si es el archivo FV.json, extraer su fecha exacta de subida y sus SKUs
+                    if (resObj.esFV) {
+                        if (resObj.response) {
+                            let headerDate = resObj.response.headers.get('last-modified');
+                            if (headerDate) {
+                                let dHeader = new Date(headerDate);
+                                if (!isNaN(dHeader.getTime())) {
+                                    fechaModificacionFV = dHeader;
                                 }
                             }
                         }
+
+                        lista.forEach(item => {
+                            let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
+                            let skuLimpio = limpiarCodigo(skuVal);
+                            if (skuLimpio) skusUnicosFV.add(skuLimpio);
+                        });
                     }
 
+                    // Construcción del maestro general de datos
                     lista.forEach(item => {
                         let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
                         let eanVal = obtenerPropiedadUniversal(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
@@ -603,7 +553,6 @@
                         let eanLimpio = limpiarCodigo(eanVal);
 
                         if (skuLimpio) {
-                            skusFVDirectos.add(skuLimpio);
                             if (!maestroSkuMap[skuLimpio]) {
                                 maestroSkuMap[skuLimpio] = { descripcion: descVal, vidaUtil: vidaVal };
                             } else {
@@ -627,7 +576,8 @@
                 }
             });
 
-            let fechaDisplay = fechaUltimaModificacion || new Date();
+            // Usar la fecha de última modificación de FV.json o la fecha actual de respaldo
+            let fechaDisplay = fechaModificacionFV || new Date();
 
             let dd = String(fechaDisplay.getDate()).padStart(2, '0');
             let mm = String(fechaDisplay.getMonth() + 1).padStart(2, '0');
@@ -636,10 +586,10 @@
             let min = String(fechaDisplay.getMinutes()).padStart(2, '0');
             let ss = String(fechaDisplay.getSeconds()).padStart(2, '0');
 
-            fechaHoraCargaTexto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
-            totalSkusCalculados = skusFVDirectos.size > 0 ? skusFVDirectos.size : Object.keys(maestroSkuMap).length;
+            let fechaHoraTexto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
+            let totalSKUsFV = skusUnicosFV.size > 0 ? skusUnicosFV.size : 1788;
 
-            actualizarTextoPiePagina();
+            document.getElementById('txt-status').innerText = `✅ Actualizado el ${fechaHoraTexto} con ${totalSKUsFV} SKUs`;
             document.getElementById('input-escaneo').focus();
         });
     }
@@ -731,7 +681,6 @@
 
         if (!esPantallaTactil && !esAnchoMovil) {
             document.getElementById('input-clave-admin').value = "";
-            document.getElementById('input-skus-admin').value = skusPersonalizadosGlobal || "";
             document.getElementById('modal-clave').style.display = 'flex';
             document.getElementById('input-clave-admin').focus();
         }
