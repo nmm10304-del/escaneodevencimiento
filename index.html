@@ -243,6 +243,12 @@
             justify-content: center;
             align-items: center;
         }
+        
+        /* Modal de confirmación con mayor prioridad visual */
+        #modal-info {
+            z-index: 2000;
+        }
+
         .modal-contenido {
             background: white;
             padding: 20px;
@@ -451,7 +457,9 @@
         document.getElementById('modal-info-titulo').innerText = titulo;
         document.getElementById('modal-info-texto').innerText = texto;
         document.getElementById('modal-info').style.display = 'flex';
-        document.getElementById('btn-modal-info-aceptar').focus();
+        setTimeout(() => {
+            document.getElementById('btn-modal-info-aceptar').focus();
+        }, 50);
     }
 
     function cerrarModalInfo() {
@@ -460,11 +468,9 @@
     }
 
     function inicializarSistemaEstatico() {
-        // Carga inmediata de caché local para 0 segundos de retraso
         let cacheEan = localStorage.getItem('promart_cache_ean');
         let cacheMaestro = localStorage.getItem('promart_cache_maestro');
         let cacheFecha = localStorage.getItem('promart_cache_fecha_libro1');
-        let customLocal = localStorage.getItem('promart_custom_skus_count');
 
         if (cacheEan && cacheMaestro) {
             try {
@@ -574,6 +580,9 @@
         skusPersonalizadosGlobal = valInput;
         actualizarTextoPiePagina();
         
+        // Cerrar el panel de admin de inmediato y mostrar la ventana de confirmación (2da imagen)
+        cerrarModoAdmin();
+        
         if (valInput) {
             mostrarModalInfo("Éxito", `Se actualizó la cantidad a ${valInput} SKUs.`);
         } else {
@@ -581,25 +590,21 @@
         }
     }
 
-    /* CARGA ULTRARRÁPIDA: FECHA EXCLUSIVA DE Libro1.json */
     function cargarArchivosBase() {
         let peticiones = [];
 
-        // 1. Cargar Libro1.json para EANs y extraer su fecha de subida de GitHub
         peticiones.push(
             fetch(`Libro1.json`)
             .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: true })) : null)
             .catch(() => null)
         );
 
-        // 2. Cargar FV.json
         peticiones.push(
             fetch(`FV.json`)
             .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: false })) : null)
             .catch(() => null)
         );
 
-        // 3. Cargar fraccionados complementarios
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
@@ -616,7 +621,6 @@
                 if (resObj && resObj.data && Array.isArray(resObj.data)) {
                     let lista = resObj.data;
 
-                    // Extraer fecha EXCLUSIVA de Libro1.json
                     if (resObj.esLibro1 && resObj.response) {
                         let headerDate = resObj.response.headers.get('last-modified');
                         if (headerDate) {
@@ -660,7 +664,6 @@
                 }
             });
 
-            // Guardar en caché para que las próximas aperturas sean instantáneas
             localStorage.setItem('promart_cache_ean', JSON.stringify(eanASkuMap));
             localStorage.setItem('promart_cache_maestro', JSON.stringify(maestroSkuMap));
 
@@ -770,7 +773,9 @@
             let customLocal = localStorage.getItem('promart_custom_skus_count');
             document.getElementById('input-skus-admin').value = customLocal || skusPersonalizadosGlobal || "";
             document.getElementById('modal-clave').style.display = 'flex';
-            document.getElementById('input-clave-admin').focus();
+            setTimeout(() => {
+                document.getElementById('input-clave-admin').focus();
+            }, 50);
         }
     }
 
@@ -785,7 +790,11 @@
             sincronizarLecturaNube();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
-            document.getElementById('input-skus-admin').focus();
+            setTimeout(() => {
+                let el = document.getElementById('input-skus-admin');
+                el.focus();
+                el.select();
+            }, 50);
         } else {
             cerrarModalClave();
             mostrarModalInfo("Error", "Contraseña incorrecta.");
@@ -841,7 +850,7 @@
         actualizarListaAlertasAdmin();
     }
 
-    /* CONTROL DE TECLADO ENTER */
+    /* CONTROL DE TECLADO ENTER INTEGRAL */
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             ocultarTecladoMovil();
@@ -851,12 +860,14 @@
 
     document.getElementById('input-clave-admin').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
+            e.preventDefault();
             validarClaveAdmin();
         }
     });
 
     document.getElementById('input-skus-admin').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
+            e.preventDefault();
             guardarCantidadSkusAdmin();
         }
     });
@@ -864,6 +875,7 @@
     window.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             if (document.getElementById('modal-info').style.display === 'flex') {
+                e.preventDefault();
                 cerrarModalInfo();
             }
         }
@@ -1003,7 +1015,6 @@
         }
     }
 
-    /* BÚSQUEDA INSTANTÁNEA SIN RETRASO */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
