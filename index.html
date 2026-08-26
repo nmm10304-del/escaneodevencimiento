@@ -244,9 +244,8 @@
             align-items: center;
         }
         
-        /* Modal de confirmación con mayor prioridad visual */
         #modal-info {
-            z-index: 2000;
+            z-index: 3000 !important;
         }
 
         .modal-contenido {
@@ -365,7 +364,7 @@
     </div>
 </div>
 
-<!-- MODAL DE NOTIFICACIONES -->
+<!-- MODAL DE NOTIFICACIONES / ÉXITO -->
 <div id="modal-info" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalInfo()">&times;</span>
@@ -396,7 +395,7 @@
             <label><b>Editar Cantidad de SKUs:</b></label>
             <div style="display: flex; gap: 8px; margin-top: 5px;">
                 <input type="tel" id="input-skus-admin" placeholder="Ej. 1788" style="margin-top:0;">
-                <button id="btn-guardar-skus-admin" class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar</button>
+                <button id="btn-guardar-skus-admin" class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin(event)">Guardar</button>
             </div>
         </div>
 
@@ -458,8 +457,9 @@
         document.getElementById('modal-info-texto').innerText = texto;
         document.getElementById('modal-info').style.display = 'flex';
         setTimeout(() => {
-            document.getElementById('btn-modal-info-aceptar').focus();
-        }, 50);
+            let btn = document.getElementById('btn-modal-info-aceptar');
+            if (btn) btn.focus();
+        }, 60);
     }
 
     function cerrarModalInfo() {
@@ -559,7 +559,10 @@
             .catch(() => {});
     }
 
-    function guardarCantidadSkusAdmin() {
+    function guardarCantidadSkusAdmin(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+
         let valInput = document.getElementById('input-skus-admin').value.trim();
         
         if (valInput) {
@@ -575,19 +578,22 @@
                 headers: { 'Content-Type': 'text/plain' },
                 mode: 'no-cors'
             });
-        } catch(e) {}
+        } catch(err) {}
 
         skusPersonalizadosGlobal = valInput;
         actualizarTextoPiePagina();
         
-        // Cerrar el panel de admin de inmediato y mostrar la ventana de confirmación (2da imagen)
+        // 1. Cerrar de inmediato el panel de administración
         cerrarModoAdmin();
         
-        if (valInput) {
-            mostrarModalInfo("Éxito", `Se actualizó la cantidad a ${valInput} SKUs.`);
-        } else {
-            mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs.");
-        }
+        // 2. Abrir de inmediato la ventana emergente de confirmación
+        setTimeout(() => {
+            if (valInput) {
+                mostrarModalInfo("Éxito", `Se actualizó la cantidad a ${valInput} SKUs.`);
+            } else {
+                mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs.");
+            }
+        }, 80);
     }
 
     function cargarArchivosBase() {
@@ -775,7 +781,7 @@
             document.getElementById('modal-clave').style.display = 'flex';
             setTimeout(() => {
                 document.getElementById('input-clave-admin').focus();
-            }, 50);
+            }, 60);
         }
     }
 
@@ -792,9 +798,11 @@
             document.getElementById('modal-admin').style.display = 'flex';
             setTimeout(() => {
                 let el = document.getElementById('input-skus-admin');
-                el.focus();
-                el.select();
-            }, 50);
+                if (el) {
+                    el.focus();
+                    el.select();
+                }
+            }, 60);
         } else {
             cerrarModalClave();
             mostrarModalInfo("Error", "Contraseña incorrecta.");
@@ -868,7 +876,8 @@
     document.getElementById('input-skus-admin').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             e.preventDefault();
-            guardarCantidadSkusAdmin();
+            e.stopPropagation();
+            guardarCantidadSkusAdmin(e);
         }
     });
 
