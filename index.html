@@ -406,8 +406,8 @@
 </div>
 
 <script>
-    let eanASkuMap = new Map();
-    let maestroSkuMap = new Map();
+    const eanASkuMap = new Map();
+    const maestroSkuMap = new Map();
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
@@ -418,7 +418,7 @@
     const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_global_v2026";
     const CANAL_SKUS_CFG = "https://ntfy.sh/promart_almacen_skus_config_v2026";
 
-    // FILTRO TOTAL CONTRA QR / URLs / LETRAS
+    // FILTRO AUTOMÁTICO DE QR / TEXTOS NO NUMÉRICOS
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
         if (permitidos.includes(e.key)) return;
@@ -429,7 +429,7 @@
 
     function limpiarTextoPegado(e) {
         let textoPegado = (e.clipboardData || window.clipboardData).getData('text');
-        let soloNumeros = textoPegado.replace(/\D/g, '');
+        let soloNumeros = String(textoPegado || '').replace(/\D/g, '');
         if (soloNumeros) {
             e.preventDefault();
             document.getElementById('input-escaneo').value = soloNumeros;
@@ -489,7 +489,7 @@
         }
 
         sincronizarSkusConfigNube();
-        cargarArchivosBase();
+        cargarArchivosPrioritarios();
         configurarEventosJulianosMóviles();
 
         sincronizarLecturaNube();
@@ -587,7 +587,9 @@
         }, 80);
     }
 
+    // INDEXACIÓN INMEDIATA EN MEMORIA
     function procesarListaEnMapas(lista) {
+        if (!Array.isArray(lista)) return;
         for (let i = 0; i < lista.length; i++) {
             let item = lista[i];
             let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
@@ -630,63 +632,55 @@
         }
     }
 
-    function cargarArchivosBase() {
-        let peticiones = [];
+    // CARGA EN PARALELO PRIORITARIA: LIBRO1 Y FV DISPONIBLES AL INSTANTE
+    function cargarArchivosPrioritarios() {
+        // Cargar Libro1.json (para EANs y fecha de GitHub)
+        fetch(`Libro1.json?r=${Date.now()}`)
+            .then(res => {
+                if (res.ok) {
+                    let headerDate = res.headers.get('last-modified');
+                    if (headerDate) {
+                        let dHeader = new Date(headerDate);
+                        if (!isNaN(dHeader.getTime())) {
+                            let dd = String(dHeader.getDate()).padStart(2, '0');
+                            let mm = String(dHeader.getMonth() + 1).padStart(2, '0');
+                            let yyyy = dHeader.getFullYear();
+                            let hh = String(dHeader.getHours()).padStart(2, '0');
+                            let min = String(dHeader.getMinutes()).padStart(2, '0');
+                            let ss = String(dHeader.getSeconds()).padStart(2, '0');
 
-        peticiones.push(
-            fetch(`Libro1.json?r=${Date.now()}`)
-            .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: true })) : null)
-            .catch(() => null)
-        );
-
-        peticiones.push(
-            fetch(`FV.json?r=${Date.now()}`)
-            .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: false })) : null)
-            .catch(() => null)
-        );
-
-        for (let i = 1; i <= 50; i++) {
-            let numStr = i < 10 ? `0${i}` : `${i}`;
-            peticiones.push(
-                fetch(`${numStr}.json?r=${Date.now()}`)
-                .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: false })) : null)
-                .catch(() => null)
-            );
-        }
-
-        Promise.all(peticiones).then(resultados => {
-            let fechaModificacionLibro1 = null;
-
-            resultados.forEach(resObj => {
-                if (resObj && resObj.data && Array.isArray(resObj.data)) {
-                    if (resObj.esLibro1 && resObj.response) {
-                        let headerDate = resObj.response.headers.get('last-modified');
-                        if (headerDate) {
-                            let dHeader = new Date(headerDate);
-                            if (!isNaN(dHeader.getTime())) {
-                                fechaModificacionLibro1 = dHeader;
-                            }
+                            fechaHoraLibro1Texto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
+                            localStorage.setItem('promart_cache_fecha_libro1', fechaHoraLibro1Texto);
+                            actualizarTextoPiePagina();
                         }
                     }
-                    procesarListaEnMapas(resObj.data);
+                    return res.json();
                 }
-            });
+                return null;
+            })
+            .then(data => {
+                if (data) procesarListaEnMapas(data);
+            })
+            .catch(() => {});
 
-            if (fechaModificacionLibro1) {
-                let dd = String(fechaModificacionLibro1.getDate()).padStart(2, '0');
-                let mm = String(fechaModificacionLibro1.getMonth() + 1).padStart(2, '0');
-                let yyyy = fechaModificacionLibro1.getFullYear();
-                let hh = String(fechaModificacionLibro1.getHours()).padStart(2, '0');
-                let min = String(fechaModificacionLibro1.getMinutes()).padStart(2, '0');
-                let ss = String(fechaModificacionLibro1.getSeconds()).padStart(2, '0');
+        // Cargar FV.json (para Vidas Útiles)
+        fetch(`FV.json?r=${Date.now()}`)
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data) procesarListaEnMapas(data);
+            })
+            .catch(() => {});
 
-                fechaHoraLibro1Texto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
-                localStorage.setItem('promart_cache_fecha_libro1', fechaHoraLibro1Texto);
-            }
-
-            actualizarTextoPiePagina();
-            document.getElementById('input-escaneo').focus();
-        });
+        // Cargar en segundo plano complementarios 01.json a 50.json sin bloquear
+        for (let i = 1; i <= 50; i++) {
+            let numStr = i < 10 ? `0${i}` : `${i}`;
+            fetch(`${numStr}.json?r=${Date.now()}`)
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                    if (data) procesarListaEnMapas(data);
+                })
+                .catch(() => {});
+        }
     }
 
     function reportarFallaEscaneo() {
@@ -1023,7 +1017,7 @@
         }
     }
 
-    /* BÚSQUEDA INSTANTÁNEA ROBUSTA */
+    /* BÚSQUEDA INSTANTÁNEA EN 0 MILISEGUNDOS */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
