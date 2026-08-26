@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asistente de Almacén - Promart</title>
+    <title>Fecha de Vencimiento</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         * {
@@ -259,7 +259,6 @@
             font-weight: bold;
         }
 
-        /* HISTORIAL CON SCROLLBAR PARA MÁS DE 10 ALERTAS */
         .lista-reportes {
             max-height: 280px;
             overflow-y: auto;
@@ -366,7 +365,7 @@
         <span class="cerrar-modal" onclick="cerrarModalInfo()">&times;</span>
         <h3 id="modal-info-titulo" style="color: #ff6a00; margin-top:0;">Mensaje</h3>
         <p id="modal-info-texto" style="margin-bottom: 15px; font-size: 15px; color: #333;"></p>
-        <button class="btn-buscar" onclick="cerrarModalInfo()">Aceptar</button>
+        <button id="btn-modal-info-aceptar" class="btn-buscar" onclick="cerrarModalInfo()">Aceptar</button>
     </div>
 </div>
 
@@ -377,7 +376,7 @@
         <h3 style="color: #ff6a00; margin-top:0;">Atención</h3>
         <p style="margin-bottom: 10px;">Introduzca la clave de usuario ADMI:</p>
         <input type="password" id="input-clave-admin" placeholder="Contraseña de ADMI" style="margin-top:0;">
-        <button class="btn-buscar" onclick="validarClaveAdmin()">Aceptar</button>
+        <button id="btn-validar-admin" class="btn-buscar" onclick="validarClaveAdmin()">Aceptar</button>
     </div>
 </div>
 
@@ -391,7 +390,7 @@
             <label><b>Editar Cantidad de SKUs:</b></label>
             <div style="display: flex; gap: 8px; margin-top: 5px;">
                 <input type="tel" id="input-skus-admin" placeholder="Ej. 1788" style="margin-top:0;">
-                <button class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar</button>
+                <button id="btn-guardar-skus-admin" class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar</button>
             </div>
         </div>
 
@@ -424,7 +423,13 @@
 
     function limpiarTextoPegado(e) {
         let textoPegado = (e.clipboardData || window.clipboardData).getData('text');
-        if (!/^\d+$/.test(textoPegado)) {
+        // Si contiene letras o URLs de QR accidentales, se filtran a números únicamente
+        let soloNumeros = textoPegado.replace(/\D/g, '');
+        if (soloNumeros) {
+            e.preventDefault();
+            document.getElementById('input-escaneo').value = soloNumeros;
+            procesarBusquedaManual();
+        } else {
             e.preventDefault();
         }
     }
@@ -447,10 +452,12 @@
         document.getElementById('modal-info-titulo').innerText = titulo;
         document.getElementById('modal-info-texto').innerText = texto;
         document.getElementById('modal-info').style.display = 'flex';
+        document.getElementById('btn-modal-info-aceptar').focus();
     }
 
     function cerrarModalInfo() {
         document.getElementById('modal-info').style.display = 'none';
+        document.getElementById('input-escaneo').focus();
     }
 
     function inicializarSistemaEstatico() {
@@ -557,7 +564,7 @@
         }
     }
 
-    /* LECTURA EXCLUSIVA DE FV.json Y ACTUALIZACIÓN AUTOMÁTICA CON CADA SUBIDA A GITHUB */
+    /* CARGA OPTIMIZADA EN PARALELO DE FV.json Y BASES COMPLEMENTARIAS */
     function cargarArchivosBase() {
         let peticiones = [];
 
@@ -658,7 +665,6 @@
         });
     }
 
-    /* REPORTE UNIVERSAL COMPATIBLE CON MÓVILES, POCKETS Y OTRAS PC */
     function reportarFallaEscaneo() {
         let valInput = document.getElementById('input-escaneo').value.trim();
         if (!valInput) {
@@ -763,6 +769,7 @@
             sincronizarLecturaNube();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
+            document.getElementById('input-skus-admin').focus();
         } else {
             cerrarModalClave();
             mostrarModalInfo("Error", "Contraseña incorrecta.");
@@ -818,6 +825,7 @@
         actualizarListaAlertasAdmin();
     }
 
+    /* CONTROL DE TECLADO ENTER GLOBAL */
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             ocultarTecladoMovil();
@@ -828,6 +836,25 @@
     document.getElementById('input-clave-admin').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             validarClaveAdmin();
+        }
+    });
+
+    document.getElementById('input-skus-admin').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.keyCode === 13) {
+            guardarCantidadSkusAdmin();
+        }
+    });
+
+    window.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.keyCode === 13) {
+            if (document.getElementById('modal-info').style.display === 'flex') {
+                cerrarModalInfo();
+            }
+        }
+        if (e.key === 'Escape' || e.keyCode === 27) {
+            if (document.getElementById('modal-info').style.display === 'flex') cerrarModalInfo();
+            if (document.getElementById('modal-clave').style.display === 'flex') cerrarModalClave();
+            if (document.getElementById('modal-admin').style.display === 'flex') cerrarModoAdmin();
         }
     });
 
@@ -960,7 +987,7 @@
         }
     }
 
-    /* BÚSQUEDA Y EVALUACIÓN SECUENCIAL */
+    /* BÚSQUEDA INSTANTÁNEA EN MEMORIA */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
