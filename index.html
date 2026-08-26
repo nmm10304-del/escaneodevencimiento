@@ -322,7 +322,7 @@
         <div id="txt-sku" class="dato"><b>SKU:</b> ---</div>
         <div id="txt-vida" class="dato"><b>Vida útil:</b> <span id="vida-val" class="no-registra">---</span></div>
     </div>
-    <div id="txt-status" class="info-status">✅ Cargar data...</div>
+    <div id="txt-status" class="info-status">✅ Base activa</div>
 
     <div class="seccion-juliana">
         <h2>Vencimiento del producto</h2>
@@ -406,8 +406,8 @@
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
-    let fechaHoraCargaTexto = "";
-    let totalSkusCalculados = 0;
+    let fechaHoraLibro1Texto = "";
+    let totalSkusCalculados = 1788;
     let skusPersonalizadosGlobal = "";
 
     const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_global_v2026";
@@ -423,7 +423,6 @@
 
     function limpiarTextoPegado(e) {
         let textoPegado = (e.clipboardData || window.clipboardData).getData('text');
-        // Si contiene letras o URLs de QR accidentales, se filtran a números únicamente
         let soloNumeros = textoPegado.replace(/\D/g, '');
         if (soloNumeros) {
             e.preventDefault();
@@ -461,6 +460,24 @@
     }
 
     function inicializarSistemaEstatico() {
+        // Carga inmediata de caché local para 0 segundos de retraso
+        let cacheEan = localStorage.getItem('promart_cache_ean');
+        let cacheMaestro = localStorage.getItem('promart_cache_maestro');
+        let cacheFecha = localStorage.getItem('promart_cache_fecha_libro1');
+        let customLocal = localStorage.getItem('promart_custom_skus_count');
+
+        if (cacheEan && cacheMaestro) {
+            try {
+                eanASkuMap = JSON.parse(cacheEan);
+                maestroSkuMap = JSON.parse(cacheMaestro);
+            } catch(e){}
+        }
+
+        if (cacheFecha) {
+            fechaHoraLibro1Texto = cacheFecha;
+            actualizarTextoPiePagina();
+        }
+
         let borradosGuardados = localStorage.getItem('promart_borrados_pc');
         let alertasLocales = localStorage.getItem('promart_alertas_locales');
 
@@ -512,8 +529,8 @@
         let customLocal = localStorage.getItem('promart_custom_skus_count');
         let skuMostrar = customLocal ? customLocal : (skusPersonalizadosGlobal ? skusPersonalizadosGlobal : totalSkusCalculados);
 
-        if (fechaHoraCargaTexto) {
-            document.getElementById('txt-status').innerText = `✅ Actualizado el ${fechaHoraCargaTexto} con ${skuMostrar} SKUs`;
+        if (fechaHoraLibro1Texto) {
+            document.getElementById('txt-status').innerText = `✅ Actualizado el ${fechaHoraLibro1Texto} con ${skuMostrar} SKUs`;
         }
     }
 
@@ -564,55 +581,50 @@
         }
     }
 
-    /* CARGA OPTIMIZADA EN PARALELO DE FV.json Y BASES COMPLEMENTARIAS */
+    /* CARGA ULTRARRÁPIDA: FECHA EXCLUSIVA DE Libro1.json */
     function cargarArchivosBase() {
         let peticiones = [];
 
+        // 1. Cargar Libro1.json para EANs y extraer su fecha de subida de GitHub
         peticiones.push(
-            fetch(`FV.json?nocache=${Date.now()}`)
-            .then(res => res.ok ? res.json().then(data => ({ data, response: res, esFV: true })) : null)
+            fetch(`Libro1.json`)
+            .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: true })) : null)
             .catch(() => null)
         );
 
+        // 2. Cargar FV.json
         peticiones.push(
-            fetch(`Libro1.json?nocache=${Date.now()}`)
-            .then(res => res.ok ? res.json().then(data => ({ data, response: res, esFV: false })) : null)
+            fetch(`FV.json`)
+            .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: false })) : null)
             .catch(() => null)
         );
 
+        // 3. Cargar fraccionados complementarios
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
-                fetch(`${numStr}.json?nocache=${Date.now()}`)
-                .then(res => res.ok ? res.json().then(data => ({ data, response: res, esFV: false })) : null)
+                fetch(`${numStr}.json`)
+                .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: false })) : null)
                 .catch(() => null)
             );
         }
 
         Promise.all(peticiones).then(resultados => {
-            let fechaModificacionFV = null;
-            let skusUnicosFV = new Set();
+            let fechaModificacionLibro1 = null;
 
             resultados.forEach(resObj => {
                 if (resObj && resObj.data && Array.isArray(resObj.data)) {
                     let lista = resObj.data;
 
-                    if (resObj.esFV) {
-                        if (resObj.response) {
-                            let headerDate = resObj.response.headers.get('last-modified');
-                            if (headerDate) {
-                                let dHeader = new Date(headerDate);
-                                if (!isNaN(dHeader.getTime())) {
-                                    fechaModificacionFV = dHeader;
-                                }
+                    // Extraer fecha EXCLUSIVA de Libro1.json
+                    if (resObj.esLibro1 && resObj.response) {
+                        let headerDate = resObj.response.headers.get('last-modified');
+                        if (headerDate) {
+                            let dHeader = new Date(headerDate);
+                            if (!isNaN(dHeader.getTime())) {
+                                fechaModificacionLibro1 = dHeader;
                             }
                         }
-
-                        lista.forEach(item => {
-                            let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
-                            let skuLimpio = limpiarCodigo(skuVal);
-                            if (skuLimpio) skusUnicosFV.add(skuLimpio);
-                        });
                     }
 
                     lista.forEach(item => {
@@ -648,17 +660,21 @@
                 }
             });
 
-            let fechaDisplay = fechaModificacionFV || new Date();
+            // Guardar en caché para que las próximas aperturas sean instantáneas
+            localStorage.setItem('promart_cache_ean', JSON.stringify(eanASkuMap));
+            localStorage.setItem('promart_cache_maestro', JSON.stringify(maestroSkuMap));
 
-            let dd = String(fechaDisplay.getDate()).padStart(2, '0');
-            let mm = String(fechaDisplay.getMonth() + 1).padStart(2, '0');
-            let yyyy = fechaDisplay.getFullYear();
-            let hh = String(fechaDisplay.getHours()).padStart(2, '0');
-            let min = String(fechaDisplay.getMinutes()).padStart(2, '0');
-            let ss = String(fechaDisplay.getSeconds()).padStart(2, '0');
+            if (fechaModificacionLibro1) {
+                let dd = String(fechaModificacionLibro1.getDate()).padStart(2, '0');
+                let mm = String(fechaModificacionLibro1.getMonth() + 1).padStart(2, '0');
+                let yyyy = fechaModificacionLibro1.getFullYear();
+                let hh = String(fechaModificacionLibro1.getHours()).padStart(2, '0');
+                let min = String(fechaModificacionLibro1.getMinutes()).padStart(2, '0');
+                let ss = String(fechaModificacionLibro1.getSeconds()).padStart(2, '0');
 
-            fechaHoraCargaTexto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
-            totalSkusCalculados = skusUnicosFV.size > 0 ? skusUnicosFV.size : 1788;
+                fechaHoraLibro1Texto = `${dd}/${mm}/${yyyy} a las ${hh}:${min}:${ss}`;
+                localStorage.setItem('promart_cache_fecha_libro1', fechaHoraLibro1Texto);
+            }
 
             actualizarTextoPiePagina();
             document.getElementById('input-escaneo').focus();
@@ -825,7 +841,7 @@
         actualizarListaAlertasAdmin();
     }
 
-    /* CONTROL DE TECLADO ENTER GLOBAL */
+    /* CONTROL DE TECLADO ENTER */
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             ocultarTecladoMovil();
@@ -987,7 +1003,7 @@
         }
     }
 
-    /* BÚSQUEDA INSTANTÁNEA EN MEMORIA */
+    /* BÚSQUEDA INSTANTÁNEA SIN RETRASO */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
