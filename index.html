@@ -243,6 +243,11 @@
             justify-content: center;
             align-items: center;
         }
+        
+        #modal-info {
+            z-index: 3000 !important;
+        }
+
         .modal-contenido {
             background: white;
             padding: 20px;
@@ -359,7 +364,7 @@
     </div>
 </div>
 
-<!-- MODAL DE NOTIFICACIONES -->
+<!-- MODAL DE NOTIFICACIONES / ÉXITO -->
 <div id="modal-info" class="modal">
     <div class="modal-contenido">
         <span class="cerrar-modal" onclick="cerrarModalInfo()">&times;</span>
@@ -390,7 +395,7 @@
             <label><b>Editar Cantidad de SKUs:</b></label>
             <div style="display: flex; gap: 8px; margin-top: 5px;">
                 <input type="tel" id="input-skus-admin" placeholder="Ej. 1788" style="margin-top:0;">
-                <button id="btn-guardar-skus-admin" class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin()">Guardar</button>
+                <button id="btn-guardar-skus-admin" class="btn-buscar" style="width: auto; margin-top:0; padding: 8px 12px;" onclick="guardarCantidadSkusAdmin(event)">Guardar</button>
             </div>
         </div>
 
@@ -401,8 +406,8 @@
 </div>
 
 <script>
-    let eanASkuMap = {};          
-    let maestroSkuMap = {};       
+    let eanASkuMap = new Map();
+    let maestroSkuMap = new Map();
     let mesesVidaUtilActual = 0;
     let reportesAlertas = [];
     let reportesBorradosLocal = new Set();
@@ -413,6 +418,7 @@
     const CANAL_SERVER = "https://ntfy.sh/promart_almacen_alertas_global_v2026";
     const CANAL_SKUS_CFG = "https://ntfy.sh/promart_almacen_skus_config_v2026";
 
+    // FILTRO TOTAL CONTRA QR / URLs / LETRAS
     function bloquearLetras(e) {
         let permitidos = ['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
         if (permitidos.includes(e.key)) return;
@@ -451,7 +457,10 @@
         document.getElementById('modal-info-titulo').innerText = titulo;
         document.getElementById('modal-info-texto').innerText = texto;
         document.getElementById('modal-info').style.display = 'flex';
-        document.getElementById('btn-modal-info-aceptar').focus();
+        setTimeout(() => {
+            let btn = document.getElementById('btn-modal-info-aceptar');
+            if (btn) btn.focus();
+        }, 60);
     }
 
     function cerrarModalInfo() {
@@ -460,19 +469,9 @@
     }
 
     function inicializarSistemaEstatico() {
-        // Carga inmediata de caché local para 0 segundos de retraso
-        let cacheEan = localStorage.getItem('promart_cache_ean');
-        let cacheMaestro = localStorage.getItem('promart_cache_maestro');
-        let cacheFecha = localStorage.getItem('promart_cache_fecha_libro1');
         let customLocal = localStorage.getItem('promart_custom_skus_count');
-
-        if (cacheEan && cacheMaestro) {
-            try {
-                eanASkuMap = JSON.parse(cacheEan);
-                maestroSkuMap = JSON.parse(cacheMaestro);
-            } catch(e){}
-        }
-
+        let cacheFecha = localStorage.getItem('promart_cache_fecha_libro1');
+        
         if (cacheFecha) {
             fechaHoraLibro1Texto = cacheFecha;
             actualizarTextoPiePagina();
@@ -494,7 +493,7 @@
         configurarEventosJulianosMóviles();
 
         sincronizarLecturaNube();
-        setInterval(sincronizarLecturaNube, 1200);
+        setInterval(sincronizarLecturaNube, 1500);
         setInterval(sincronizarSkusConfigNube, 3000);
     }
 
@@ -553,7 +552,10 @@
             .catch(() => {});
     }
 
-    function guardarCantidadSkusAdmin() {
+    function guardarCantidadSkusAdmin(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+
         let valInput = document.getElementById('input-skus-admin').value.trim();
         
         if (valInput) {
@@ -569,41 +571,84 @@
                 headers: { 'Content-Type': 'text/plain' },
                 mode: 'no-cors'
             });
-        } catch(e) {}
+        } catch(err) {}
 
         skusPersonalizadosGlobal = valInput;
         actualizarTextoPiePagina();
         
-        if (valInput) {
-            mostrarModalInfo("Éxito", `Se actualizó la cantidad a ${valInput} SKUs.`);
-        } else {
-            mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs.");
+        cerrarModoAdmin();
+        
+        setTimeout(() => {
+            if (valInput) {
+                mostrarModalInfo("Éxito", `Se actualizó la cantidad a ${valInput} SKUs.`);
+            } else {
+                mostrarModalInfo("Restablecido", "Se volvió al conteo automático de SKUs.");
+            }
+        }, 80);
+    }
+
+    function procesarListaEnMapas(lista) {
+        for (let i = 0; i < lista.length; i++) {
+            let item = lista[i];
+            let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
+            let eanVal = obtenerPropiedadUniversal(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
+            let descVal = obtenerPropiedadUniversal(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
+            let vidaVal = buscarVidaUtilGenerica(item);
+
+            let skuLimpio = limpiarCodigo(skuVal);
+            let eanLimpio = limpiarCodigo(eanVal);
+
+            if (skuLimpio) {
+                let skuSinCeros = skuLimpio.replace(/^0+/, '');
+                let actual = maestroSkuMap.get(skuLimpio) || maestroSkuMap.get(skuSinCeros);
+                
+                if (!actual) {
+                    let objData = { descripcion: descVal, vidaUtil: vidaVal };
+                    maestroSkuMap.set(skuLimpio, objData);
+                    if (skuSinCeros !== skuLimpio && skuSinCeros !== "") {
+                        maestroSkuMap.set(skuSinCeros, objData);
+                    }
+                } else {
+                    if ((!actual.descripcion || actual.descripcion === "Sin descripción") && descVal) {
+                        actual.descripcion = descVal;
+                    }
+                    if (!actual.vidaUtil && vidaVal) {
+                        actual.vidaUtil = vidaVal;
+                    }
+                }
+            }
+
+            if (eanLimpio && skuLimpio) {
+                let eanSinCeros = eanLimpio.replace(/^0+/, '');
+                let eanData = { sku: skuLimpio, descripcion: descVal };
+                
+                eanASkuMap.set(eanLimpio, eanData);
+                if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
+                    eanASkuMap.set(eanSinCeros, eanData);
+                }
+            }
         }
     }
 
-    /* CARGA ULTRARRÁPIDA: FECHA EXCLUSIVA DE Libro1.json */
     function cargarArchivosBase() {
         let peticiones = [];
 
-        // 1. Cargar Libro1.json para EANs y extraer su fecha de subida de GitHub
         peticiones.push(
-            fetch(`Libro1.json`)
+            fetch(`Libro1.json?r=${Date.now()}`)
             .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: true })) : null)
             .catch(() => null)
         );
 
-        // 2. Cargar FV.json
         peticiones.push(
-            fetch(`FV.json`)
+            fetch(`FV.json?r=${Date.now()}`)
             .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: false })) : null)
             .catch(() => null)
         );
 
-        // 3. Cargar fraccionados complementarios
         for (let i = 1; i <= 50; i++) {
             let numStr = i < 10 ? `0${i}` : `${i}`;
             peticiones.push(
-                fetch(`${numStr}.json`)
+                fetch(`${numStr}.json?r=${Date.now()}`)
                 .then(res => res.ok ? res.json().then(data => ({ data, response: res, esLibro1: false })) : null)
                 .catch(() => null)
             );
@@ -614,9 +659,6 @@
 
             resultados.forEach(resObj => {
                 if (resObj && resObj.data && Array.isArray(resObj.data)) {
-                    let lista = resObj.data;
-
-                    // Extraer fecha EXCLUSIVA de Libro1.json
                     if (resObj.esLibro1 && resObj.response) {
                         let headerDate = resObj.response.headers.get('last-modified');
                         if (headerDate) {
@@ -626,43 +668,9 @@
                             }
                         }
                     }
-
-                    lista.forEach(item => {
-                        let skuVal = obtenerPropiedadUniversal(item, ["SKU", "sku", "Articulo", "ARTICULO", "articulo"]);
-                        let eanVal = obtenerPropiedadUniversal(item, ["EAN", "ean", "Código de barras", "CODIGO", "Codigo", "codigo"]);
-                        let descVal = obtenerPropiedadUniversal(item, ["DESCRIPCION", "DESCRIPCIÓN", "Descripción", "descripcion", "DESCRIPCION_LARGA"]);
-                        let vidaVal = buscarVidaUtilGenerica(item);
-
-                        let skuLimpio = limpiarCodigo(skuVal);
-                        let eanLimpio = limpiarCodigo(eanVal);
-
-                        if (skuLimpio) {
-                            if (!maestroSkuMap[skuLimpio]) {
-                                maestroSkuMap[skuLimpio] = { descripcion: descVal, vidaUtil: vidaVal };
-                            } else {
-                                if ((!maestroSkuMap[skuLimpio].descripcion || maestroSkuMap[skuLimpio].descripcion === "Sin descripción") && descVal) {
-                                    maestroSkuMap[skuLimpio].descripcion = descVal;
-                                }
-                                if (!maestroSkuMap[skuLimpio].vidaUtil && vidaVal) {
-                                    maestroSkuMap[skuLimpio].vidaUtil = vidaVal;
-                                }
-                            }
-                        }
-
-                        if (eanLimpio && skuLimpio) {
-                            eanASkuMap[eanLimpio] = { sku: skuLimpio, descripcion: descVal };
-                            let eanSinCeros = eanLimpio.replace(/^0+/, '');
-                            if (eanSinCeros !== eanLimpio && eanSinCeros !== "") {
-                                eanASkuMap[eanSinCeros] = { sku: skuLimpio, descripcion: descVal };
-                            }
-                        }
-                    });
+                    procesarListaEnMapas(resObj.data);
                 }
             });
-
-            // Guardar en caché para que las próximas aperturas sean instantáneas
-            localStorage.setItem('promart_cache_ean', JSON.stringify(eanASkuMap));
-            localStorage.setItem('promart_cache_maestro', JSON.stringify(maestroSkuMap));
 
             if (fechaModificacionLibro1) {
                 let dd = String(fechaModificacionLibro1.getDate()).padStart(2, '0');
@@ -770,7 +778,9 @@
             let customLocal = localStorage.getItem('promart_custom_skus_count');
             document.getElementById('input-skus-admin').value = customLocal || skusPersonalizadosGlobal || "";
             document.getElementById('modal-clave').style.display = 'flex';
-            document.getElementById('input-clave-admin').focus();
+            setTimeout(() => {
+                document.getElementById('input-clave-admin').focus();
+            }, 60);
         }
     }
 
@@ -785,7 +795,13 @@
             sincronizarLecturaNube();
             actualizarListaAlertasAdmin();
             document.getElementById('modal-admin').style.display = 'flex';
-            document.getElementById('input-skus-admin').focus();
+            setTimeout(() => {
+                let el = document.getElementById('input-skus-admin');
+                if (el) {
+                    el.focus();
+                    el.select();
+                }
+            }, 60);
         } else {
             cerrarModalClave();
             mostrarModalInfo("Error", "Contraseña incorrecta.");
@@ -841,7 +857,7 @@
         actualizarListaAlertasAdmin();
     }
 
-    /* CONTROL DE TECLADO ENTER */
+    /* ACCIONES DE TECLADO ENTER */
     document.getElementById('input-escaneo').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             ocultarTecladoMovil();
@@ -851,19 +867,23 @@
 
     document.getElementById('input-clave-admin').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
+            e.preventDefault();
             validarClaveAdmin();
         }
     });
 
     document.getElementById('input-skus-admin').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
-            guardarCantidadSkusAdmin();
+            e.preventDefault();
+            e.stopPropagation();
+            guardarCantidadSkusAdmin(e);
         }
     });
 
     window.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             if (document.getElementById('modal-info').style.display === 'flex') {
+                e.preventDefault();
                 cerrarModalInfo();
             }
         }
@@ -1003,7 +1023,7 @@
         }
     }
 
-    /* BÚSQUEDA INSTANTÁNEA SIN RETRASO */
+    /* BÚSQUEDA INSTANTÁNEA ROBUSTA */
     function procesarBusquedaManual() {
         ocultarTecladoMovil();
 
@@ -1018,19 +1038,16 @@
         let skuFinal = "";
         let descripcionFinal = "";
 
-        if (eanASkuMap[codigoLimpio]) {
-            skuFinal = eanASkuMap[codigoLimpio].sku;
-            descripcionFinal = eanASkuMap[codigoLimpio].descripcion || "";
-        } else if (eanASkuMap[codigoSinCeros]) {
-            skuFinal = eanASkuMap[codigoSinCeros].sku;
-            descripcionFinal = eanASkuMap[codigoSinCeros].descripcion || "";
+        let eanMatch = eanASkuMap.get(codigoLimpio) || eanASkuMap.get(codigoSinCeros);
+        if (eanMatch) {
+            skuFinal = eanMatch.sku;
+            descripcionFinal = eanMatch.descripcion || "";
         } else {
             skuFinal = codigoLimpio;
         }
 
         let skuFinalSinCeros = skuFinal.replace(/^0+/, '');
-
-        let infoMaestra = maestroSkuMap[skuFinal] || maestroSkuMap[skuFinalSinCeros];
+        let infoMaestra = maestroSkuMap.get(skuFinal) || maestroSkuMap.get(skuFinalSinCeros);
 
         limpiarCalculadoraManual();
 
